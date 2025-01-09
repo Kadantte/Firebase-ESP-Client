@@ -1,7 +1,7 @@
-# Firebase Arduino Client Library for ESP8266 and ESP32
+# Firebase Arduino Client Library for Arduino
 
 
-Google's Firebase Arduino Client Library for ESP8266 and ESP32 v2.7.2
+Google's Firebase Arduino Client Library for ESP8266 and ESP32
 
 
 The default filessystem used in the library is flash and SD.
@@ -34,17 +34,65 @@ void begin(FirebaseConfig *config, FirebaseAuth *auth);
 
 #### Setup the ID token for authentication.
 
-param **`param config`** The pointer to FirebaseConfig data.
+param **`config`** The pointer to FirebaseConfig data.
 
-param **`param`** idToken The ID Token.
+param **`idToken`** The ID Token.
 
-param **`param`** expire The expired interval in seeconds (max.3600 sec).
+param **`expire`** The expired interval in seeconds (max.3600 sec).
+
+param **`refreshToken`** The refresh token for token refreshment.
 
 note For FirebaseConfig and FirebaseAuth data usage, see the examples.
 
 ```cpp
-void setIdToken(FirebaseConfig *config, const char *idToken, size_t expire = 3600);
+void setIdToken(FirebaseConfig *config, <string> idToken, size_t expire = 3600, <string> refreshToken = "");
 ```
+
+
+
+
+#### Setup the access token for authentication.
+
+param **`config`** The pointer to FirebaseConfig data.
+
+param **`accessToken`** The access Token.
+
+param **`expire`** The expired interval in seeconds (max.3600 sec).
+
+param **`refreshToken`** The refresh token for token refreshment.
+
+param **`clientId`** The The client identifier issued to the client during the registration process.
+
+param **`clientSecret`** The client secret.
+
+note For FirebaseConfig and FirebaseAuth data usage, see the examples.
+
+```cpp
+void setAccessToken(FirebaseConfig *config, <string> accessToken, size_t expire = 3600, <string> refreshToken = "", <string> clientId = "", <string> clientSecret = "");
+```
+
+
+
+
+
+
+#### Setup the custom token for authentication.
+
+param **`config`** The pointer to FirebaseConfig data.
+
+param **`customToken`** The Identity Platform custom token.
+
+If the refresh token from Custom token verification or sign in, was assigned here instead of 
+custom token (signed JWT token), the token refresh process will be performed immediately.
+
+Any token that is not in the form header.payload.signature i.e., xxxxx.yyyyy.zzzzz will be treated as refresh token.
+
+note For FirebaseConfig and FirebaseAuth data usage, see the examples.
+
+```cpp
+void setCustomToken(FirebaseConfig *config, <string> customToken);
+```
+
 
 
 #### Check for token expiry status.
@@ -54,6 +102,32 @@ return **`bool`** of expiry status.
 ```cpp
 bool isTokenExpired();
 ```
+
+
+
+
+#### Force the token to expire immediately and refresh.
+
+param **`config`** The pointer to FirebaseConfig data.
+
+```cpp
+void refreshToken(FirebaseConfig *config);
+```
+
+
+
+
+
+#### Reset stored config and auth credentials.
+
+param **`config`** The pointer to FirebaseConfig data.
+
+```cpp
+void reset(FirebaseConfig *config);
+```
+
+
+
 
 
 #### Provide the details of token generation.
@@ -99,7 +173,7 @@ struct token_info_t authTokenInfo();
 
 return **`Boolean`** type status indicates the token generation is completed.
 
-This returns false if ready() returns false (token generation is not ready).
+This function should be called repeatedly to handle authentication tasks.
 
 ```cpp
 bool ready();
@@ -110,6 +184,8 @@ bool ready();
 #### Provide the grant access status for Firebase Services.
 
 return **`Boolean`** type status indicates the device can access to the services.
+
+This returns false if ready() returns false (token generation is not ready).
 
 ```cpp
 bool authenticated();
@@ -169,9 +245,9 @@ param **`idToken`** The id token of user that was already signed in with Email a
 
 return **`Boolean`** value, indicates the success of the operation. 
 
-note: The id token can be obtained from config.signer.tokens.id_token after begin with config and auth data
+note: The id token can be obtained from Firebase.getToken() after begin with config and auth data.
 
-If the idToken is not assigned, the internal config.signer.tokens.id_token will be used. 
+If the idToken is not assigned, the internal id_token will be used.
 
 See the Templates of Email address verification in the Firebase console, Authentication.
 
@@ -205,6 +281,47 @@ void reconnectWiFi(bool reconnect);
 
 
 
+#### Get currently used auth token string.
+
+param **`constant char*`** of currently used auth token.
+
+```cpp
+const char *getToken();
+```
+
+
+
+#### Get refresh token string.
+
+return **`constant char*`** of refresh token.
+
+```cpp
+const char *getRefreshToken();
+```
+
+
+
+#### Get free Heap memory.
+
+return **`int *`** of free Heap memory size.
+
+```cpp
+int getFreeHeap();
+```
+
+
+
+#### Get current timestamp.
+
+return **`time_t *`** of current timestamp.
+
+```cpp
+time_t getCurrentTime();
+```
+
+
+
+
 #### Set the decimal places for float value to be stored in database.
 
 param **`digits`** The decimal places. 
@@ -225,21 +342,94 @@ void setDoubleDigits(uint8_t digits);
 
 
 
-#### SD card config with GPIO pins.
+#### Initiate SD card with SPI port configuration.
+
+param **`ss`** The SPI Chip/Slave Select pin.
+
+param **`sck`** The SPI Clock pin.
+
+param **`miso`** The SPI MISO pin.
+
+param **`mosi`** The SPI MOSI pin.
+
+aram **`frequency`** The SPI frequency.
+
+return **`boolean`** The boolean value indicates the success of operation.
+
+```cpp
+bool sdBegin(int8_t ss = -1, int8_t sck = -1, int8_t miso = -1, int8_t mosi = -1, uint32_t frequency = 4000000);
+```
+
+
+
+
+
+#### Initiate SD card with SD FS configurations (ESP8266 only).
 
 param **`ss`** SPI Chip/Slave Select pin.
 
-param **`sck`** SPI Clock pin.
+param **`sdFSConfig`** The pointer to SDFSConfig object (ESP8266 only).
 
-param **`miso`** SPI MISO pin.
-
-param **`mosi`** SPI MOSI pin.
-
-return **`Boolean`** type status indicates the success of the operation.
+return **`boolean`** type status indicates the success of the operation.
 
 ```cpp
-bool sdBegin( int8_t ss = -1, int8_t sck = -1, int8_t miso = -1, int8_t mosi = -1);
+  bool sdBegin(SDFSConfig *sdFSConfig);
 ```
+
+
+
+
+
+#### Initiate SD card with chip select and SPI configuration (ESP32 only).
+
+param **`ss`** The SPI Chip/Slave Select pin.
+
+param **`spiConfig`** The pointer to SPIClass object for SPI configuartion.
+
+param **`frequency`** The SPI frequency.
+
+return **`boolean`** The boolean value indicates the success of operation.
+
+```cpp
+bool sdBegin(int8_t ss, SPIClass *spiConfig = nullptr, uint32_t frequency = 4000000);
+```
+
+
+
+
+
+#### Initiate SD card with SdFat SPI and pins configurations (with SdFat included only).
+
+param **`sdFatSPIConfig`** The pointer to SdSpiConfig object for SdFat SPI configuration.
+
+param **`ss`** The SPI Chip/Slave Select pin.
+
+param **`sck`** The SPI Clock pin.
+
+param **`miso`** The SPI MISO pin.
+
+param **`mosi`** The SPI MOSI pin.
+
+return **`boolean`** The boolean value indicates the success of operation.
+
+```cpp
+ bool sdBegin(SdSpiConfig *sdFatSPIConfig, int8_t ss = -1, int8_t sck = -1, int8_t miso = -1, int8_t mosi = -1);
+```
+
+
+
+
+
+#### Initiate SD card with SdFat SDIO configuration (with SdFat included only).
+
+param **`sdFatSDIOConfig`** The pointer to SdioConfig object for SdFat SDIO configuration.
+
+return **`boolean`** The boolean value indicates the success of operation.
+
+```cpp
+ bool sdBegin(SdioConfig *sdFatSDIOConfig);
+```
+
 
 
 
@@ -254,7 +444,7 @@ param **`format_if_mount_failed`** Format SD_MMC card if mount failed.
 return **`Boolean`** type status indicates the success of the operation.
 
 ```cpp
-bool sdMMCBegin(<string> mountpoint = "/sdcard", bool mode1bit = false, bool format_if_mount_failed = false);
+bool sdMMCBegin(const char *mountpoint = "/sdcard", bool mode1bit = false, bool format_if_mount_failed = false);
 ```
 
 
@@ -272,6 +462,17 @@ bool setSystemTime(time_t ts);
 ```
 
 
+#### Provide the http code error string
+
+param **`httpCode`** The http code.
+
+param **`buff`** The String buffer out.
+
+```cpp
+void errorToString(int httpCode, String &buff)
+```
+
+
 
 ## Realtime database functions
 
@@ -285,18 +486,6 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 ```cpp
 void end(FirebaseData *fbdo);
-```
-
-
-
-#### Enable multiple HTTP requests at a time (for ESP32 only).
-
-param **`enable`** The boolean value to enable/disable.
-
-note: The multiple HTTP requessts at a time is disable by default to prevent the large memory used in multiple requests.
-
-```cpp
-void allowMultipleRequests(bool enable);
 ```
 
 
@@ -331,12 +520,28 @@ void setwriteSizeLimit(FirebaseData *fbdo, <string> size);
 
 param **`fbdo`** The pointer to Firebase Data Object.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 ```cpp
 bool getRules(FirebaseData *fbdo);
 ```
 
+
+#### Save the database rules to file.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`storageType`** The enum of memory storage type e.g. mem_storage_type_flash and mem_storage_type_sd. The file systems can be changed in FirebaseFS.h.
+
+param **`filename`** Filename to save rules.
+
+param **`callback`** Optional. The callback function that accept RTDB_DownloadStatusInfo data.
+
+return **`Boolean`** type status indicates the success of the operation.
+
+```cpp
+ getRules(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> filename, RTDB_DownloadProgressCallback callback = NULL)
+```
 
 
 #### Write the database rules.
@@ -345,11 +550,31 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`rules`** Database rules in jSON String format.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 ```cpp
 bool setRules(FirebaseData *fbdo, <string> rules);
 ```
+
+
+
+#### Restore the database rules from file.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`storageType`** The enum of memory storage type e.g. mem_storage_type_flash and mem_storage_type_sd. The file systems can be changed in FirebaseFS.h.
+
+param **`filename`** Filename to read the rules from.
+
+param **`callback`** Optional. The callback function that accept RTDB_UploadStatusInfo data.
+
+return **`Boolean`** type status indicates the success of the operation.
+
+```cpp
+ setRules(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> filename, RTDB_UploadProgressCallback callback = NULL)
+```
+
+
 
 
 #### Set the .read and .write database rules.
@@ -366,7 +591,7 @@ param **`writeVal`** The child node key .write value.
 
 param **`databaseSecret`** The database secret.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 note: The databaseSecret can be empty if the auth type is OAuth2.0 or legacy and required if auth type is Email/Password sign-in. 
 
@@ -386,7 +611,7 @@ param **`node`** The child node key that is being queried.
 
 param **`databaseSecret`** The database secret.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 note: The databaseSecret can be empty if the auth type is OAuth2.0 or legacy and required if auth type is Email/Password sign-in.
 
@@ -404,7 +629,7 @@ param **`path`** The parent path of child's node that the index is being removed
 
 param **`databaseSecret`** The database secret.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 note: The databaseSecret can be empty if the auth type is OAuth2.0 or legacy and required if auth type is Email/Password sign-in.
 
@@ -420,7 +645,7 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node.
 
-return - **`Boolean`** value, true if the defined node was found.
+return **`Boolean`** value, true if the defined node was found.
 
 ```cpp
 bool pathExisted(FirebaseData *fbdo, <string> path);
@@ -480,7 +705,7 @@ param **`path`** The path to the node.
 
 param **`priority`** The priority value.
     
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 This allows us to set priority to any node other than a priority that set through setJSON, 
 pushJSON, updateNode, and updateNodeSilent functions.
@@ -499,7 +724,7 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node.
     
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 ```cpp
 bool getPriority(FirebaseData *fbdo, <string> path);
@@ -528,7 +753,7 @@ param **`fileName`** The file path includes its name.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool push(FirebaseData *fbdo, <string> path, <type> value);
@@ -539,9 +764,9 @@ bool push(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size);
 
 bool pushAsync(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size);
 
-bool push(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool push(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName);
 
-bool pushAsync(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool pushAsync(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName);
 ```
 
 
@@ -559,7 +784,7 @@ param **`priority`** The priority value.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool push(FirebaseData *fbdo, <string> path, <type> value,  float priority);
@@ -580,7 +805,7 @@ param **`value`** The appended value.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushInt(FirebaseData *fbdo, <string> path, int value);
@@ -611,7 +836,7 @@ param **`value`** The appended value.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushFloat(FirebaseData *fbdo, <string> path, float value);
@@ -642,7 +867,7 @@ param **`value`** The appended value.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushDouble(FirebaseData *fbdo, <string> path, double value);
@@ -673,7 +898,7 @@ param **`value`** The appended value.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushBool(FirebaseData *fbdo, <string> path, bool value);
@@ -704,7 +929,7 @@ param **`value`** The appended value.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushString(FirebaseData *fbdo, <string> path, <string> value);
@@ -735,7 +960,7 @@ param **`json`** The pointer to the FirebaseJson object which contains the child
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushJSON(FirebaseData *fbdo, <string> path, FirebaseJson *json);
@@ -768,7 +993,7 @@ param **`arr`** The pointer to the FirebaseJsonArray object.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushArray(FirebaseData *fbdo, <string> path, FirebaseJsonArray *arr);
@@ -801,7 +1026,7 @@ param **`size`** Size of the byte array.
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushBlob(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size);
@@ -823,15 +1048,17 @@ param **`path`** The path to the node in which binary data will be appended.
 
 param **`fileName`** The file path includes its name.
 
+param **`callback`** Optional. The callback function that accept RTDB_UploadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation.
 
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
-bool pushFile(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool pushFile(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, RTDB_UploadProgressCallback callback = NULL);
 
-bool pushFileAsync(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool pushFileAsync(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, RTDB_UploadProgressCallback callback = NULL);
 ```
 
 
@@ -842,10 +1069,10 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node in which timestamp will be appended.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
     
 The key or name of new created node will be stored in Firebase Data object, 
-call \<FirebaseData\>.pushName() to get the key.
+call `<FirebaseData>.pushName()` to get the key.
 
 ```cpp
 bool pushTimestamp(FirebaseData *fbdo, <string> path);
@@ -871,9 +1098,9 @@ param **`fileName`** The file path includes its name.
 
 return **`Boolean`** value, indicates the success of the operation.
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<type>() to get value (cast) that stored on the defined node e.g. \<FirebaseData\>.to<String>() to get the String value.
+Call `<FirebaseData>.to<type>()` to get value (cast) that stored on the defined node e.g. `<FirebaseData>.to<String>()` to get the String value.
 
 ```cpp
 bool set(FirebaseData *fbdo, <string> path, <type> value);
@@ -884,9 +1111,9 @@ bool set(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size);
 
 bool setAsync(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size);
 
-bool set(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool set(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName);
 
-bool setAsync(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool setAsync(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName);
 ```
 
 
@@ -903,9 +1130,9 @@ param **`priority`** The priority value.
 
 return **`Boolean`** value, indicates the success of the operation.
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<type>() to get value (cast) that stored on the defined node e.g. \<FirebaseData\>.to<String>() to get the String value.
+Call `<FirebaseData>.to<type>()` to get value (cast) that stored on the defined node e.g. `<FirebaseData>.to<String>()` to get the String value.
 
 ```cpp
 bool set(FirebaseData *fbdo, <string> path, <type> value, float priority);
@@ -938,11 +1165,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched). 
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-And \<FirebaseData\>.to<type>() to get value (cast) that stored on the defined node e.g. \<FirebaseData\>.to<String>() to get the String value.
+And `<FirebaseData>.to<type>()` to get value (cast) that stored on the defined node e.g. `<FirebaseData>.to<String>()` to get the String value.
 
 ```cpp
 bool set(FirebaseData *fbdo, <string> path, <type> value, <string> ETag);
@@ -953,9 +1180,9 @@ bool set(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size, <string>
 
 bool setAsync(FirebaseData *fbdo, <string> path, uint8_t *blob, size_t size, <string> ETag);
 
-bool set(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag);
+bool set(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag);
 
-bool setAsync(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag);
+bool setAsync(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag);
 ```
 
 
@@ -979,11 +1206,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched). 
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-And \<FirebaseData\>.to<type>() to get value (cast) that stored on the defined node e.g. \<FirebaseData\>.to<String>() to get the String value.
+And `<FirebaseData>.to<type>()` to get value (cast) that stored on the defined node e.g. `<FirebaseData>.to<String>()` to get the String value.
 
 ```cpp
 bool set(FirebaseData *fbdo, <string> path, <type> value, float priority, <string> ETag);
@@ -1005,9 +1232,9 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<int>() to get the integer value that stored on the defined node.
+Call `<FirebaseData>.to<int>()` to get the integer value that stored on the defined node.
 
 ```cpp
 bool setInt(FirebaseData *fbdo, <string> path, int value);
@@ -1037,18 +1264,18 @@ param **`value`** Integer value to set.
 
 param **`ETag`** Known unique identifier string (ETag) of the defined node.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 
 
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched). 
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-And \<FirebaseData\>.to<int>() to get the integer value that stored on the defined node.
+And `<FirebaseData>.to<int>()` to get the integer value that stored on the defined node.
     
 ```cpp
 bool setInt(FirebaseData *fbdo, <string> path, int value, <string> ETag);
@@ -1080,9 +1307,9 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<float>() to get the float value that stored on the defined node.
+Call `<FirebaseData>.to<float>()` to get the float value that stored on the defined node.
 
 ```cpp
 bool setFloat(FirebaseData *fbdo, <string> path, float value);
@@ -1119,11 +1346,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched). 
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<float>() to get the float value that stored on the defined node.
+Call `<FirebaseData>.to<float>()` to get the float value that stored on the defined node.
 
 ```cpp
 bool setFloat(FirebaseData *fbdo, <string> path, float value, <string> ETag);
@@ -1155,12 +1382,12 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<double>() to get the double value that stored on the defined node.
+Call `<FirebaseData>.to<double>()` to get the double value that stored on the defined node.
 
 Due to bugs in Serial.print in Arduino, to print large double value with zero decimal place, 
-use printf("%.9lf\n", firebaseData.to<double>()); for print the returned double value up to 9 decimal places.
+use `Serial.printf("%.9lf\n", firebaseData.to<double>());` for print the returned double value up to 9 decimal places.
 
 ```cpp
 bool setDouble(FirebaseData *fbdo, <string> path, double value);
@@ -1197,11 +1424,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched). 
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-And \<FirebaseData\>.to<double>() to get the double value that stored on the defined node.
+And `<FirebaseData>.to<double>()` to get the double value that stored on the defined node.
 
 ```cpp
 bool setDouble(FirebaseData *fbdo, <string> path, double value, <string> ETag);
@@ -1233,9 +1460,9 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<bool>() to get the boolean value that stored on the defined node.
+Call `<FirebaseData>.to<bool>()` to get the boolean value that stored on the defined node.
 
 ```cpp
 bool setBool(FirebaseData *fbdo, <string> path, bool value);
@@ -1272,11 +1499,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched). 
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<bool>() to get the boolean value that stored on the defined node.
+Call `<FirebaseData>.to<bool>()` to get the boolean value that stored on the defined node.
 
 ```cpp
 bool setBool(FirebaseData *fbdo, <string> path, bool value, <string> ETag);
@@ -1308,9 +1535,9 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<String>() to get the String value that stored on the defined node.
+Call `<FirebaseData>.to<String>()` to get the String value that stored on the defined node.
 
 ```cpp
 bool setString(FirebaseData *fbdo, <string> path, <string> value);
@@ -1347,11 +1574,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched).
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value.
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value.
 
-Also, call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also, call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<String>() to get the String value that stored on the defined node.
+Call `<FirebaseData>.to<String>()` to get the String value that stored on the defined node.
 
 ```cpp
 bool setString(FirebaseData *fbdo, <string> path, <string> value, <string> ETag);
@@ -1385,9 +1612,9 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<FirebaseJson>() and \<FirebaseData\>.to<FirebaseJson *>() will return reference to object and pointer to FirebaseJson object from payload.
+Call `<FirebaseData>.to<FirebaseJson>()` and `<FirebaseData>.to<FirebaseJson *>()` will return reference to object and pointer to FirebaseJson object from payload.
 
 ```cpp
 bool setJSON(FirebaseData *fbdo, <string> path, FirebaseJson *json);
@@ -1426,11 +1653,11 @@ return **`Boolean`** value, indicates the success of the operation.
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched).
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value. 
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value. 
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<FirebaseJson>() and \<FirebaseData\>.to<FirebaseJson *>() will return reference to object and pointer to FirebaseJson object from payload.
+Call `<FirebaseData>.to<FirebaseJson>()` and `<FirebaseData>.to<FirebaseJson *>()` will return reference to object and pointer to FirebaseJson object from payload.
 
 ```cpp
 bool setJSON(FirebaseData *fbdo, <string> path, FirebaseJson *json, <string> ETag);
@@ -1460,13 +1687,13 @@ param **`path`** The path to the node in which array will be replaced or set.
 
 param **`arr`** The pointer to FirebaseJsonArray object.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-Call \<FirebaseData\>.to<FirebaseJsonArray>() and \<FirebaseData\>.to<FirebaseJsonArray*>() will return reference to object and pointer to FirebaseJsonArray object that contains the array from payload.
+Call `<FirebaseData>.to<FirebaseJsonArray>()` and `<FirebaseData>.to<FirebaseJsonArray *>()` will return reference to object and pointer to FirebaseJsonArray object that contains the array from payload.
 
 ```cpp
 bool setArray(FirebaseData *fbdo, <string> path, FirebaseJsonArray *arr);
@@ -1498,18 +1725,18 @@ param **`arr`** The pointer to FirebaseJsonArray object.
 
 param **`ETag`** Known unique identifier string (ETag) of defined node.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 
 
 If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched).
 
-If the operation failed due to ETag is not match, call \<FirebaseData\>.ETag() to get the current ETag value.
+If the operation failed due to ETag is not match, call `<FirebaseData>.ETag()` to get the current ETag value.
 
-Also call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to get the type of data that successfully stored in the database. 
+Also call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to get the type of data that successfully stored in the database. 
 
-And \<FirebaseData\>.to<FirebaseJsonArray>() to get the FirebaseJsonArray value that stored on the defined node.
+And `<FirebaseData>.to<FirebaseJsonArray>()` to get the FirebaseJsonArray value that stored on the defined node.
 
 ```cpp
 bool setArray(FirebaseData *fbdo, <string> path, FirebaseJsonArray *arr, <string> ETag);
@@ -1594,14 +1821,16 @@ param **`path`** The path to the node in which binary data will be set.
 
 param **`fileName`** The file path includes its name.
 
+param **`callback`** Optional. The callback function that accept RTDB_DownloadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation.
 
 No payload returned from the server.
 
 ```cpp
-bool setFile(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool setFile(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, RTDB_DownloadProgressCallback callback = NULL);
 
-bool setFileAsync(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName);
+bool setFileAsync(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, RTDB_DownloadProgressCallback callback = NULL);
 ```
 
 
@@ -1620,6 +1849,8 @@ param **`fileName`** The file path includes its name.
 
 param **`ETag`** Known unique identifier string (ETag) of defined node.
 
+param **`callback`** Optional. The callback function that accept RTDB_DownloadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation.
 
 No payload returned from the server. 
@@ -1628,10 +1859,11 @@ If ETag at the defined node does not match the provided ETag parameter,
 the operation will be failed with the http return code 412, Precondition Failed (ETag is not matched).
 
 ```cpp
-bool setFile(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag);
+bool setFile(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag, RTDB_DownloadProgressCallback callback = NULL);
 
-bool setFileAsync(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag);
+bool setFileAsync(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> path, <string> fileName, <string> ETag, RTDB_DownloadProgressCallback callback = NULL);
 ```
+
 
 
 
@@ -1641,13 +1873,13 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node in which timestamp will be set.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
     
-Call \<FirebaseData\>.to<int>() will return the integer value of timestamp in seconds 
-or \<FirebaseData\>.to<double>() to get millisecond timestamp. 
+Call `<FirebaseData>.to<int>()` will return the integer value of timestamp in seconds 
+or `<FirebaseData>.to<double>()` to get millisecond timestamp. 
 
 Due to bugs in Serial.print in Arduino, to print large double value with zero decimal place, 
-use printf("%.0lf\n", firebaseData.to<double>());.
+use `Serial.printf("%.0lf\n", firebaseData.to<double>());`.
 
 ```cpp
 bool setTimestamp(FirebaseData *fbdo, <string> path);
@@ -1720,16 +1952,16 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
 
-Call \<FirebaseData\>.to<int>(), \<FirebaseData\>.to<float>, \<FirebaseData\>.to<double>, 
-\<FirebaseData\>.to<bool>, \<FirebaseData\>.to<String>, \<FirebaseData\>.to<FirebaseJson>(),
-\<FirebaseData\>.to<FirebaseJson*>(), \<FirebaseData\>.to<FirebaseJsonArray>(),
-\<FirebaseData\>.to<FirebaseJsonArray*>(), \<FirebaseData\>.to<std::vector<uint8_t> *> and \<FirebaseData\>.to<File>() corresponded to its type that get from \<FirebaseData\>.dataType.
+Call `<FirebaseData>.to<int>()`, `<FirebaseData>.to<float>`, `<FirebaseData>.to<double>`, 
+`<FirebaseData>.to<bool>`, `<FirebaseData>.to<String>`, `<FirebaseData>.to<FirebaseJson>()`,
+`<FirebaseData>.to<FirebaseJson *>()`, `<FirebaseData>.to<FirebaseJsonArray>()`,
+`<FirebaseData>.to<FirebaseJsonArray *>()`, `<FirebaseData>.to<std::vector<uint8_t> *>` and `<FirebaseData>.to<File>()` corresponded to its type that get from `<FirebaseData>.dataType`.
 
 ```cpp
 bool get(FirebaseData *fbdo, <string> path);
@@ -1745,12 +1977,12 @@ param **`path`** The path to the node.
 
 return **`Boolean`** value, indicates the success of the operation.
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<int> will return the integer value of payload returned from server.
+Call `<FirebaseData>.to<int>()` will return the integer value of payload returned from server.
 
 If the type of payload returned from server is not integer, float and double, 
-the function \<FirebaseData\>.to<int>() will return zero (0).
+the function `<FirebaseData>.to<int>()` will return zero (0).
 
 ```cpp
 bool getInt(FirebaseData *fbdo, <string> path);
@@ -1785,12 +2017,12 @@ param **`path`** The path to the node.
 
 return **`Boolean`** value, indicates the success of the operation.
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<float> will return the float value of payload returned from server.
+Call `<FirebaseData>.to<float>()` will return the float value of payload returned from server.
 
 If the payload returned from server is not integer, float and double, 
-the function \<FirebaseData\>.to<float>() will return zero (0).
+the function `<FirebaseData>.to<float>()` will return zero (0).
 
 ```cpp
 bool getFloat(FirebaseData *fbdo, <string> path);
@@ -1827,15 +2059,15 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<double> will return the double value of payload returned from server.
+Call `<FirebaseData>.to<double>()` will return the double value of payload returned from server.
 
 If the payload returned from server is not integer, float and double, 
-the function \<FirebaseData\>.to<double>() will return zero (0).
+the function `<FirebaseData>.to<double>()` will return zero (0).
 
 Due to bugs in Serial.print in Arduino, to print large double value with zero decimal place, 
-use printf("%.9lf\n", firebaseData.to<double>()); for print value up to 9 decimal places.
+use `Serial.printf("%.9lf\n", firebaseData.to<double>());` for print value up to 9 decimal places.
 
 ```cpp
 bool getDouble(FirebaseData *fbdo, <string> path);
@@ -1872,12 +2104,12 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<bool> will return the boolean value of payload returned from server.
+Call `<FirebaseData>.to<bool>()` will return the boolean value of payload returned from server.
 
 If the type of payload returned from the server is not Boolean, 
-the function \<FirebaseData\>.to<bool>() will return false.
+the function `<FirebaseData>.to<bool>()` will return false.
 
 ```cpp
 bool getBool(FirebaseData *fbdo, <string> path);
@@ -1914,12 +2146,12 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<String> will return the String value of payload returned from server.
+Call `<FirebaseData>.to<String>()` will return the String value of payload returned from server.
 
 If the type of payload returned from the server is not a string,
-the function \<FirebaseData\>.to<String>() will return empty string.
+the function `<FirebaseData>.to<String>()` will return empty string.
 
 ```cpp
 bool getString(FirebaseData *fbdo, <string> path);
@@ -1933,15 +2165,15 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node.
 
-param **`target`** The pointer to String object variable to store the value.
+param **`target`** String, std::string or chars array variable to store the value.
 
 return **`Boolean`** value, indicates the success of the operation.
 
-If the type of payload returned from the server is not a string,
-the target String object's value will be empty.
+If the target is chars array, the size of chars array should be greater than the size of payload string to prevent error.
+
 
 ```cpp
-bool getString(FirebaseData *fbdo, <string> path, String *target);
+bool getString(FirebaseData *fbdo, <string> path, <string_or_chars_array> *target);
 ```
 
 
@@ -1956,12 +2188,12 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<FirebaseJson>() and \<FirebaseData\>.to<FirebaseJson *>() will return reference to object and pointer to FirebaseJson object from payload. 
+Call `<FirebaseData>.to<FirebaseJson>()` and `<FirebaseData>.to<FirebaseJson *>()` will return reference to object and pointer to FirebaseJson object from payload. 
 
 If the type of payload returned from server is not json,
-the function \<FirebaseData\>.to<FirebaseJson>() will contain empty object.
+the function `<FirebaseData>.to<FirebaseJson>()` will contain empty object.
 
 ```cpp
 bool getJSON(FirebaseData *fbdo, <string> path);
@@ -2027,12 +2259,12 @@ Use any child key to filter by that key.
 **`QueryFilter.equalTo`**       Value (number or string) matches the orderBy param
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<FirebaseJson>() and \<FirebaseData\>.to<FirebaseJson *>() will return reference to object and pointer to FirebaseJson object from payload.
+Call `<FirebaseData>.to<FirebaseJson>()` and `<FirebaseData>.to<FirebaseJson *>()` will return reference to object and pointer to FirebaseJson object from payload.
 
 If the type of payload returned from server is not JSON,
-the function \<FirebaseData\>.to<FirebaseJson>() will contain empty object.
+the function `<FirebaseData>.to<FirebaseJson>()` will contain empty object.
 
 ```cpp
 bool getJSON(FirebaseData *fbdo, <string> path, QueryFilter *query);
@@ -2067,16 +2299,16 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`path`** The path to the node.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<FirebaseJsonArray>() and \<FirebaseData\>.to<FirebaseJsonArray*>() will return reference to object and pointer to FirebaseJsonArray object that contains the array from payload.
+Call `<FirebaseData>.to<FirebaseJsonArray>()` and `<FirebaseData>.to<FirebaseJsonArray *>()` will return reference to object and pointer to FirebaseJsonArray object that contains the array from payload.
 
 If the type of payload returned from the server is not an array,
-the array element in \<FirebaseData\>.to<FirebaseJsonArray>() will be empty.
+the array element in `<FirebaseData>.to<FirebaseJsonArray>()` will be empty.
 
 ```cpp
 bool getArray(FirebaseData *fbdo, <string> path);
@@ -2092,7 +2324,7 @@ param **`path`** The path to the node.
 
 param **`target`** The pointer to FirebaseJsonArray object variable to store the value.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 If the type of payload returned from the server is not an array, 
 the target FirebaseJsonArray object will contain an empty array.
@@ -2111,7 +2343,7 @@ param **`path`** The path to the node.
 
 param **`query`** QueryFilter class to set query parameters to filter data.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 
 
@@ -2137,12 +2369,12 @@ QueryFilter.equalTo -       Value (number or string) matches the orderBy param
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database. 
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database. 
     
-Call \<FirebaseData\>.to<FirebaseJsonArray>() and \<FirebaseData\>.to<FirebaseJsonArray*>() will return reference to object and pointer to FirebaseJsonArray object that contains the array from payload.
+Call `<FirebaseData>.to<FirebaseJsonArray>()` and `<FirebaseData>.to<FirebaseJsonArray *>()` will return reference to object and pointer to FirebaseJsonArray object that contains the array from payload.
 
 If the type of payload returned from the server is not an array,
-the function \<FirebaseData\>.to<FirebaseJsonArray>() will contain empty array.
+the function `<FirebaseData>.to<FirebaseJsonArray>()` will contain empty array.
 
 ```cpp
 bool getArray(FirebaseData *fbdo, <string> path, QueryFilter *query);
@@ -2158,7 +2390,7 @@ param **`path`** The path to the node.
 
 param **`target`** The pointer to FirebaseJsonArray object variable to store the value.
 
-return - **`Boolean`** value, indicates the success of the operation.
+return **`Boolean`** value, indicates the success of the operation.
 
 If the type of payload returned from the server is not an array,
 the target FirebaseJsonArray object will contain an empty array.
@@ -2179,12 +2411,12 @@ return **`Boolean`** value, indicates the success of the operation.
 
 
 
-Call \<FirebaseData\>.dataType or \<FirebaseData\>.dataTypeNum to determine what type of data successfully stores in the database.
+Call `<FirebaseData>.dataType` or `<FirebaseData>.dataTypeNum` to determine what type of data successfully stores in the database.
 
-Call \<FirebaseData\>.to<std::vector<uint8_t> *> will return the pointer to uint8_t dynamic array data of payload returned from server.
+Call `<FirebaseData>.to<std::vector<uint8_t> *>` will return the pointer to uint8_t dynamic array data of payload returned from server.
 
 If the type of payload returned from the server is not a blob,
-the function \<FirebaseData\>.blobData will return empty array.
+the function `<FirebaseData>.to<std::vector<uint8_t> *>` will return empty array.
 
 ```cpp
 bool getBlob(FirebaseData *fbdo, <string> path);
@@ -2226,10 +2458,32 @@ param **`nodePath`** The path to the node that file data will be downloaded.
 
 param **`fileName`**  The file path includes its name.
 
+param **`callback`** Optional. The callback function that accept RTDB_DownloadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation.
 
 ```cpp
-bool getFile(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> nodePath, <string> fileName);
+bool getFile(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> nodePath, <string> fileName, RTDB_DownloadProgressCallback callback = NULL);
+```
+
+
+
+#### Download a firmware file from the database.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`fwPath`** The firmware data path.
+
+param **`callback`** Optional. The callback function that accept RTDB_DownloadStatusInfo data.
+
+return **`Boolean`** value, indicates the success of the operation.
+
+Note: In ESP8266, this function will allocate 16k+ memory for internal SSL client.
+
+Firmware data is the bin file that stored on datanbase using pushFile or setFile function. 
+
+```cpp
+bool downloadOTA(FirebaseData *fbdo, <string> fwPath, RTDB_DownloadProgressCallback callback = NULL);
 ```
 
 
@@ -2277,7 +2531,7 @@ param **`timestampNode`** The sub-child node that keep the timestamp.
 
 param **`limit`** The maximum number of children nodes to delete at once, 30 is maximum.
 
-param **`dataRetentionPeriod`**The period in seconds of data in the past which will be retained.
+param **`dataRetentionPeriod`** The period in seconds of data in the past which will be retained.
 
 return **`Boolean`** value, indicates the success of the operation.*
 
@@ -2438,6 +2692,19 @@ void removeMultiPathStreamCallback(FirebaseData *fbdo);
 
 
 
+
+#### Run Stream manually.
+
+To manually triggering the stream callback function, 
+this should call repeatedly in loop().
+
+```cpp
+void runStream();
+```
+
+
+
+
 #### Backup (download) the database at the defined node to the storage memory.
 
 param **`fbdo`** The pointer to Firebase Data Object.
@@ -2450,10 +2717,12 @@ param **`nodePath`** The path to the node to be backuped.
 
 param **`fileName`**  File name to save.
 
+param **`callback`** Optional. The callback function that accept RTDB_DownloadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation.
 
 ```cpp
-bool backup(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> nodePath, <string> fileName);
+bool backup(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> nodePath, <string> fileName, RTDB_DownloadProgressCallback callback = NULL);
 ```
 
 
@@ -2470,10 +2739,12 @@ param **`nodePath`** The path to the node to be restored the data.
 
 param **`fileName`** File name to read.
 
+param **`callback`** Optional. The callback function that accept RTDB_UploadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation.
 
 ```cpp
-bool restore(FirebaseData *fbdo, fb_esp_mem_storage_type storageType, <string> nodePath, <string> fileName);
+bool restore(FirebaseData *fbdo, firebase_mem_storage_type storageType, <string> nodePath, <string> fileName, RTDB_UploadProgressCallback callback = NULL);
 ```
 
 
@@ -2517,7 +2788,7 @@ param **`storageType`** The enum of memory storage type e.g. mem_storage_type_fl
 The file systems can be changed in FirebaseFS.h.
     
 ```cpp
-bool saveErrorQueue(FirebaseData *fbdo, <string> filename, fb_esp_mem_storage_type storageType);
+bool saveErrorQueue(FirebaseData *fbdo, <string> filename, firebase_mem_storage_type storageType);
 ```
 
 
@@ -2531,7 +2802,7 @@ param **`storageType`** The enum of memory storage type e.g. mem_storage_type_fl
 The file systems can be changed in FirebaseFS.h.
     
 ```cpp
-bool deleteStorageFile(<string> filename, fb_esp_mem_storage_type storageType);
+bool deleteStorageFile(<string> filename, firebase_mem_storage_type storageType);
 ```
 
 
@@ -2547,7 +2818,7 @@ param **`storageType`** The enum of memory storage type e.g. mem_storage_type_fl
 The file systems can be changed in FirebaseFS.h.
     
 ```cpp
-bool restoreErrorQueue(FirebaseData *fbdo, <string> filename, fb_esp_mem_storage_type storageType);
+bool restoreErrorQueue(FirebaseData *fbdo, <string> filename, firebase_mem_storage_type storageType);
 ```
 
 
@@ -2565,7 +2836,7 @@ The file systems can be changed in FirebaseFS.h.
 return **`Number`** (0-255) of queues store in defined queue file.
 
 ```cpp
-uint8_t errorQueueCount(FirebaseData *fbdo, <string> filename, fb_esp_mem_storage_type storageType);
+uint8_t errorQueueCount(FirebaseData *fbdo, <string> filename, firebase_mem_storage_type storageType);
 ```
 
 
@@ -2626,7 +2897,7 @@ param **`fbdo`** The pointer to Firebase Data Object.
 
 param **`errorQueueID`** The Firebase Error Queue ID get from getErrorQueueID.
     
-return - **`Boolean`** typestatus indicates the queue existence.
+return **`Boolean`** typestatus indicates the queue existence.
 
 ```cpp
 bool isErrorQueueExisted(FirebaseData *fbdo, uint32_t errorQueueID);
@@ -2866,11 +3137,11 @@ param **`projectId`** The Firebase project id (only the name without the firebas
 
 param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
 
-param **`writes`** The dyamic array of write object fb_esp_firestore_document_write_t.
+param **`writes`** The dyamic array of write object firebase_firestore_document_write_t.
 
 For the write object, see https://firebase.google.com/docs/firestore/reference/rest/v1/Write
 
-param **`transaction`** A base64-encoded string.vIf set, applies all writes in this transaction, and commits it.
+param **`transaction`** A base64-encoded string. If set, applies all writes in this transaction, and commits it.
 
 return **`Boolean`** value, indicates the success of the operation.
 
@@ -2879,9 +3150,46 @@ Use FirebaseData.payload() to get the returned payload.
 This function requires Email/password, Custom token or OAuth2.0 authentication.
 
 ```cpp
-bool commitDocument(FirebaseData *fbdo, <string> projectId, <string> databaseId, std::vector<struct fb_esp_firestore_document_write_t> writes, <string> transaction = "");
+bool commitDocument(FirebaseData *fbdo, <string> projectId, <string> databaseId, 
+std::vector<struct firebase_firestore_document_write_t> writes, <string> transaction = "");
 
-bool commitDocumentAsync(FirebaseData *fbdo, <string> projectId, <string> databaseId, std::vector<struct fb_esp_firestore_document_write_t> writes, <string> transaction = "");
+bool commitDocumentAsync(FirebaseData *fbdo, <string> projectId, <string> databaseId, 
+std::vector<struct firebase_firestore_document_write_t> writes, <string> transaction = "");
+```
+
+
+
+####  Applies a batch of write operations.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`projectId`** The Firebase project id (only the name without the firebaseio.com).
+
+param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
+
+param **`writes`** The dyamic array of write object firebase_firestore_document_write_t.
+
+Method does not apply writes atomically and does not guarantee ordering.
+
+Each write succeeds or fails independently.
+
+You cannot write to the same document more than once per request.
+
+For the write object, see https://firebase.google.com/docs/firestore/reference/rest/v1/Write
+
+param **`labels`** The FirebaseJson pointer that represents the Labels (map) associated with this batch write.
+
+return **`Boolean`** value, indicates the success of the operation.
+
+Use FirebaseData.payload() to get the returned payload.
+
+This function requires Email/password, Custom token or OAuth2.0 authentication.
+
+For more description, see https://cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/batchWrite
+
+```cpp
+bool batchWriteDocuments(FirebaseData *fbdo, <string> projectId, <string> databaseId, 
+std::vector<struct firebase_firestore_document_write_t> writes, FirebaseJson *labels = nullptr);
 ```
 
 
@@ -2919,6 +3227,57 @@ This function requires Email/password, Custom token or OAuth2.0 authentication.
 ```cpp
 bool getDocument(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> documentPath, <string> mask = "", <string> transaction = "", <string> readTime = "");
 ```
+
+
+
+
+#### Gets multiple documents.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`projectId`** The Firebase project id (only the name without the firebaseio.com).
+
+param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
+
+param **`documentPaths`** The list of relative path of documents to get. Use comma (,) to separate between the field names.
+
+param **`mask`** The fields to return. If not set, returns all fields. 
+
+If the document has a field that is not present in this mask, that field will not be returned in the response. 
+
+Use comma (,) to separate between the field names.
+
+param **`batchOperationCallback`** The callback fuction that accepts const char* as argument.
+
+Union field consistency_selector can be only one of the following.
+
+param **`transaction`** Reads the document in a transaction. A base64-encoded string.
+
+param **`newTransaction`** FirebaseJson pointer that represents TransactionOptions object.
+
+Starts a new transaction and reads the documents.
+
+Defaults to a read-only transaction.
+
+The new transaction ID will be returned as the first response in the stream.
+
+param **`readTime`** Reads the version of the document at the given time. This may not be older than 270 seconds.
+
+A timestamp in RFC3339 UTC "Zulu" format, with nanosecond resolution and up to nine fractional digits. 
+
+Examples: "2014-10-02T15:01:23Z" and "2014-10-02T15:01:23.045123456Z".
+
+return **`Boolean`** value, indicates the success of the operation.
+
+Use FirebaseData.payload() to get the returned payload.
+
+This function requires Email/password, Custom token or OAuth2.0 authentication.
+
+```cpp
+bool batchGetDocuments(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> documentPaths, <string> mask, FirebaseData::FirestoreBatchOperationsCallback batchOperationCallback, <string> transaction, 
+FirebaseJson *newTransaction, <string> readTime);
+```
+
 
 
 
@@ -2987,7 +3346,7 @@ bool rollback(FirebaseData *fbdo, <string> projectId, <string> databaseId, <stri
 
 
 
-#### Get a document at the defined path.
+#### Runs a query.
 
 param **`fbdo`** The pointer to Firebase Data Object.
 
@@ -3000,9 +3359,9 @@ param **`documentPath`** The relative path of document to get.
 param **`structuredQuery`** The pointer to FirebaseJson object that contains the Firestore query. For the description of structuredQuery, see https://cloud.google.com/firestore/docs/reference/rest/v1/StructuredQuery
 
 param **`consistencyMode`** Optional. The consistency mode for this transaction 
-e.g. fb_esp_firestore_consistency_mode_transaction,
-fb_esp_firestore_consistency_mode_newTransaction
-and fb_esp_firestore_consistency_mode_readTime
+e.g. firebase_firestore_consistency_mode_transaction,
+firebase_firestore_consistency_mode_newTransaction
+and firebase_firestore_consistency_mode_readTime
 
 param **`consistency`** Optional. The value based on consistency mode e.g. transaction string, TransactionOptions (JSON) and date time string.
 
@@ -3015,7 +3374,7 @@ Use FirebaseData.payload() to get the returned payload.
 This function requires Email/password, Custom token or OAuth2.0 authentication.
 
 ```cpp
-bool runQuery(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> documentPath, <string> structuredQuery, fb_esp_firestore_consistency_mode consistencyMode, <string> consistency);
+bool runQuery(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> documentPath, <string> structuredQuery, firebase_firestore_consistency_mode consistencyMode, <string> consistency);
 ```
 
 
@@ -3110,20 +3469,128 @@ bool listCollectionIds(FirebaseData *fbdo, <string> projectId, <string> database
 
 
 
-## Firebase Cloud Messaging Functions
-
-These functions can be called directly from FCM object in the Firebase object e.g. Firebase.FCM.\<function name\>
-
-
-
-#### Clear all Firbase Error Queues in Error Queue collection.
+#### Creates a composite index.
 
 param **`fbdo`** The pointer to Firebase Data Object.
 
+param **`projectId`** The Firebase project id (only the name without the firebaseio.com).
+
+param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
+
+param **`collectionId`** The relative path of document colection.
+
+param **`apiScope`** The API scope enum e.g., ANY_API and DATASTORE_MODE_API
+
+param **`queryScope`** The QueryScope enum string e.g., QUERY_SCOPE_UNSPECIFIED, COLLECTION, and COLLECTION_GROUP
+
+See https://cloud.google.com/firestore/docs/reference/rest/Shared.Types/QueryScope
+
+param **`fields`** The FirebaseJsonArray that represents array of fields (IndexField JSON object) of indexes.
+
+A IndexField object contains the keys "fieldPath" and the uinion field "value_mode" of "order" and "arrayConfig"
+
+Where the fieldPath value is the field path string of index.
+
+Where order is the enum string of ORDER_UNSPECIFIED, ASCENDING, and DESCENDING.
+
+And arrayConfig is the ArrayConfig enum string of ARRAY_CONFIG_UNSPECIFIED and CONTAINS
+
+return **`Boolean`** value, indicates the success of the operation.
+
+Note Use FirebaseData.payload() to get the returned payload.
+
+This function requires OAuth2.0 authentication.
+
+For more description, see https://cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.collectionGroups.indexes/create
+
 ```cpp
-void clearErrorQueue(FirebaseData *fbdo);
+bool createIndex(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> collectionId, 
+<string> apiScope, <string> queryScope, FirebaseJsonArray *fields);
 ```
 
+
+
+#### Deletes an index.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`projectId`** The Firebase project id (only the name without the firebaseio.com).
+
+param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
+
+param **`collectionId`** The relative path of document colection.
+
+param **`indexId`** The index to delete.
+
+Note Use FirebaseData.payload() to get the returned payload.
+
+This function requires OAuth2.0 authentication.
+
+For more description, see https://cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.collectionGroups.indexes/delete
+
+```cpp
+bool deleteIndex(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> collectionId, <string> indexId);
+```
+
+
+
+#### Lists the indexes that match the specified filters.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`projectId`** The Firebase project id (only the name without the firebaseio.com).
+
+param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
+
+param **`collectionId`** The relative path of document colection.
+
+param **`filter`** The filter to apply to list results.
+
+param **`pageSize`** The number of results to return.
+
+param **`pageToken`** A page token, returned from a previous call to FirestoreAdmin.ListIndexes, that may be used to get the next page of results.
+
+Note Use FirebaseData.payload() to get the returned payload.
+
+This function requires OAuth2.0 authentication.
+
+For more description, see https://cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.collectionGroups.indexes/list
+
+```cpp
+bool listIndex(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> collectionId, <string> filter,
+int pageSize, <string> pageToken);
+```
+
+
+
+#### Get an index.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`projectId`** The Firebase project id (only the name without the firebaseio.com).
+
+param **`databaseId`** The Firebase Cloud Firestore database id which is (default) or empty "".
+
+param **`collectionId`** The relative path of document colection.
+
+param **`indexId`** The index to get.
+
+Note Use FirebaseData.payload() to get the returned payload.
+
+This function requires OAuth2.0 authentication.
+
+For more description, see https://cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.collectionGroups.indexes/get
+
+```cpp
+bool getIndex(FirebaseData *fbdo, <string> projectId, <string> databaseId, <string> collectionId, <string> indexId);
+```
+
+
+
+
+## Firebase Cloud Messaging Functions
+
+These functions can be called directly from FCM object in the Firebase object e.g. Firebase.FCM.\<function name\>
 
 
 #### Set the server key.
@@ -3247,7 +3714,7 @@ param **`numToken`** The size of instance ID tokens array.
 return **`Boolean`** value, indicates the success of the operation. 
 
 ```cpp
-bool subscibeTopic(FirebaseData *fbdo, <string> topic, <string> IID[], size_t numToken);
+bool subscribeTopic(FirebaseData *fbdo, <string> topic, <string> IID[], size_t numToken);
 ```
 
 
@@ -3265,7 +3732,7 @@ param **`numToken`** The size of instance ID tokens array.
 return **`Boolean`** value, indicates the success of the operation. 
 
 ```cpp
-bool unsubscibeTopic(FirebaseData *fbdo, <string> topic, <string> IID[], size_t numToken);
+bool unsubscribeTopic(FirebaseData *fbdo, <string> topic, <string> IID[], size_t numToken);
 ```
 
 
@@ -3338,12 +3805,14 @@ param **`remotetFileName`** The file path includes its name of uploaded file in 
 
 param **`mime`** The file MIME type
 
+param **`callback`** Optional. The callback function that accept FCS_UploadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation. 
 
 Use FirebaseData.downloadURL() to get the download link.
 
 ```cpp
-bool upload(FirebaseData *fbdo, <string> bucketID, <string> localFileName, fb_esp_mem_storage_type storageType, <string> remotetFileName, <string> mime);
+bool upload(FirebaseData *fbdo, <string> bucketID, <string> localFileName, firebase_mem_storage_type storageType, <string> remotetFileName, <string> mime, FCS_UploadProgressCallback callback = NULL);
 ```
 
 
@@ -3362,12 +3831,14 @@ param **`remotetFileName`** The file path includes its name of uploaded file in 
 
 param **`mime`** The file MIME type
 
+param **`callback`** Optional. The callback function that accept FCS_UploadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation. 
 
 Use FirebaseData.downloadURL() to get the download link.
 
 ```cpp
-bool upload(FirebaseData *fbdo, <string> bucketID, uint8_t *data, size_t len, <string> remoteFileName, <string> mime);
+bool upload(FirebaseData *fbdo, <string> bucketID, uint8_t *data, size_t len, <string> remoteFileName, <string> mime, FCS_UploadProgressCallback callback = NULL);
 ```
 
 
@@ -3386,10 +3857,32 @@ param **`storageType`** The enum of memory storage type e.g. mem_storage_type_fl
 
 The file systems can be changed in FirebaseFS.h.
 
+param **`callback`** Optional. The callback function that accept FCS_DownloadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation. 
 
 ```cpp
-bool download(FirebaseData *fbdo, <string> bucketID, <string> remoteFileName, <string> localFileName, fb_esp_mem_storage_type storageType);
+bool download(FirebaseData *fbdo, <string> bucketID, <string> remoteFileName, <string> localFileName, firebase_mem_storage_type storageType, FCS_DownloadProgressCallback callback = NULL);
+```
+
+
+
+#### Download a firmware file from the Firebase Storage data bucket for OTA updates.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`bucketID`** The Firebase storage bucket ID in the project.
+
+param **`remotetFileName`** The firmware file path includes its name of file in the data bucket to download.
+
+param **`callback`** Optional. The callback function that accept FCS_DownloadStatusInfo data.
+
+return **`Boolean`** value, indicates the success of the operation. 
+
+Note: In ESP8266, this function will allocate 16k+ memory for internal SSL client.
+
+```cpp
+bool downloadOTA(FirebaseData *fbdo, <string> bucketID, <string> remoteFileName, FCS_DownloadProgressCallback callback = NULL);
 ```
 
 
@@ -3441,6 +3934,14 @@ Use the FileList type data to get name and bucket properties for each item.
 
 ```cpp
 bool listFiles(FirebaseData *fbdo, <string> bucketID);
+```
+
+
+
+#### Run Resumable upload tasks manually.
+
+```cpp
+void runResumableUploadTask();
 ```
 
 
@@ -3500,7 +4001,7 @@ The upload with metadata supports allows the library to add the metadata interna
 User also can add custom metadata for the uploading file (object).
 
 ```cpp
-bool upload(FirebaseData *fbdo, <string> bucketID, <string> localFileName, fb_esp_mem_storage_type storageType, fb_esp_gcs_upload_type uploadType, <string> remoteFileName, <string> mime, UploadOptions *uploadOptions = nullptr, RequestProperties *requestProps = nullptr, UploadStatusInfo *status = nullptr, ProgressCallback callback = NULL);
+bool upload(FirebaseData *fbdo, <string> bucketID, <string> localFileName, firebase_mem_storage_type storageType, firebase_gcs_upload_type uploadType, <string> remoteFileName, <string> mime, UploadOptions *uploadOptions = nullptr, RequestProperties *requestProps = nullptr, UploadStatusInfo *status = nullptr, ProgressCallback callback = NULL);
 ```
 
 
@@ -3523,12 +4024,35 @@ param **`option`** Optional. The pointer to StorageGetOptions data that contains
 
 For the query parameters options, see https://cloud.google.com/storage/docs/json_api/v1/objects/get#optional-parameters
 
+param **`callback`** Optional. The callback function that accept GCS_DownloadStatusInfo data.
+
 return **`Boolean`** value, indicates the success of the operation. 
 
 This function requires OAuth2.0 authentication.
 
 ```cpp
-bool download(FirebaseData *fbdo, <string> bucketID, <string> remoteFileName, <string> localFileName, fb_esp_mem_storage_type storageType, StorageGetOptions *options = nullptr);
+bool download(FirebaseData *fbdo, <string> bucketID, <string> remoteFileName, <string> localFileName, firebase_mem_storage_type storageType, StorageGetOptions *options = nullptr, GCS_DownloadProgressCallback callback = NULL);
+```
+
+
+
+
+#### Download a firmware file from the Google Cloud Storage data bucket for OTA updates.
+
+param **`fbdo`** The pointer to Firebase Data Object.
+
+param **`bucketID`** The Firebase or Google Cloud Storage bucket ID.
+
+param **`remotetFileName`** The firmware file path includes its name of file in the data bucket to download.
+
+param **`callback`** Optional. The callback function that accept GCS_DownloadStatusInfo data.
+
+return **`Boolean`** value, indicates the success of the operation. 
+
+Note: In ESP8266, this function will allocate 16k+ memory for internal SSL client.
+
+```cpp
+bool downloadOTA(FirebaseData *fbdo, <string> bucketID, <string> remoteFileName, GCS_DownloadProgressCallback callback = NULL);
 ```
 
 
@@ -3701,6 +4225,19 @@ This function requires OAuth2.0 authentication.
 ```cpp
 bool patchFunction(FirebaseData *fbdo, <string> functionId, FunctionsConfig *patchData);
 ```
+
+
+
+
+#### Run Functions deploying tasks manually.
+  
+To manually triggering the deploy task callback function, 
+this should call repeatedly in loop().
+
+```cpp
+void runDeployTasks();
+```
+
 
 
 
@@ -3931,6 +4468,75 @@ The description of PolicyBuilder and FunctionsConfig classes and their functions
 
 
 
+### Assign external Arduino generic client.
+
+param **`client`** The pointer to Arduino Client.
+
+param **`networkConnectionCB`** The function that handles the network connection.
+
+param **`networkStatusCB`** The function that handle the network connection status acknowledgement.
+
+```cpp
+void setGenericClient(Client *client, FB_NetworkConnectionRequestCallback networkConnectionCB,
+                        FB_NetworkStatusRequestCallback networkStatusCB);
+```
+
+
+
+
+#### Assign TinyGsm Clients.
+
+param **`client`** The pointer to TinyGsmClient.
+
+param **`modem`** The pointer to TinyGsm modem object. Modem should be initialized and/or set mode before transfering data.
+
+param **`pin`** The SIM pin.
+
+param **`apn`** The GPRS APN (Access Point Name).
+
+param **`user`** The GPRS user.
+
+param **`password`** The GPRS password.
+
+```cpp
+void setGSMClient(Client *client, void *modem, const char *pin, const char *apn, const char *user, const char *password);
+```
+
+
+
+
+
+#### Assign external Ethernet Client.
+
+param **`client`** The pointer to Ethernet client object.
+
+param **`macAddress`** The Ethernet MAC address.
+
+param **`csPin`** The Ethernet module SPI chip select pin.
+
+param **`resetPin`** The Ethernet module reset pin.
+
+param **`staticIP`** (Optional) The pointer to `Firebase_StaticIP` object which included these IPAddress properties ipAddress, netMask, defaultGateway and dnsServer.
+
+```cpp
+ void setEthernetClient(Client *client, uint8_t macAddress[6], int csPin, int resetPin, Firebase_StaticIP *staticIP = nullptr);
+```
+
+
+
+
+
+#### Set the network status acknowledgement.
+
+param **`status`** The network status. 
+
+```cpp
+void setNetworkStatus(bool status);
+```
+
+
+
+
 #### Set the receive and transmit buffer memory size for secured mode BearSSL WiFi client.
 
 param **`rx`** The number of bytes for receive buffer memory for secured mode BearSSL (512 is minimum, 16384 is maximum).
@@ -3961,9 +4567,27 @@ void setResponseSize(uint16_t len);
 return **`WiFi client instance`**.
 
 ```cpp
-WiFiClientSecure *getWiFiClient();
+ESP_SSLClient *getWiFiClient();
 ```
 
+
+
+#### Close the keep-alive connection of the internal SSL client.
+
+note: This will release the memory used by internal SSL client.
+
+```cpp
+void stopWiFiClient();
+```
+
+
+
+
+#### Close the internal flash temporary file.
+
+```cpp
+void closeFile();
+```
 
 
 #### Set the Root certificate for a FirebaseData object
@@ -4000,27 +4624,27 @@ String dataType();
 
 #### Get the data type of payload returned from the server (RTDB only)
 
-return **`The enumeration value of fb_esp_rtdb_data_type.`**
+return **`The enumeration value of firebase_rtdb_data_type.`**
 
-fb_esp_rtdb_data_type_null or 1,
+firebase_rtdb_data_type_null or 1,
 
-fb_esp_rtdb_data_type_integer or 2,
+firebase_rtdb_data_type_integer or 2,
 
-fb_esp_rtdb_data_type_float or 3,
+firebase_rtdb_data_type_float or 3,
 
-fb_esp_rtdb_data_type_double or 4,
+firebase_rtdb_data_type_double or 4,
 
-fb_esp_rtdb_data_type_boolean or 5,
+firebase_rtdb_data_type_boolean or 5,
 
-fb_esp_rtdb_data_type_string or 6,
+firebase_rtdb_data_type_string or 6,
 
-fb_esp_rtdb_data_type_json or 7,
+firebase_rtdb_data_type_json or 7,
 
-fb_esp_rtdb_data_type_array or 8,
+firebase_rtdb_data_type_array or 8,
 
-fb_esp_rtdb_data_type_blob or 9,
+firebase_rtdb_data_type_blob or 9,
 
-fb_esp_rtdb_data_type_file or 10
+firebase_rtdb_data_type_file or 10
 
 ```cpp
 uint8_t dataTypeEnum();
@@ -4088,6 +4712,18 @@ return **`The error description string (String object).`**
 ```cpp
 String errorReason();
 ```
+
+
+#### Get the error code from the process
+
+return **`The error code (int).`**
+
+See src/FB_Error.h
+
+```cpp
+String errorCode();
+```
+
 
 
 
@@ -4188,6 +4824,27 @@ return **`FirebaseJsonArray object pointer`**.
 ```cpp
 FirebaseJsonArray *jsonArrayPtr();
 ```
+
+
+
+#### Return the internal Firebase JSON Data object.
+
+return **`FirebaseJsonData object`**.
+
+```cpp
+FirebaseJsonData &jsonData();
+```
+
+
+
+#### Return the pointer to internal Firebase JSON Data object.
+
+return **`FirebaseJsonData object pointer`**.
+
+```cpp
+FirebaseJsonData *jsonDataPtr();
+```
+
 
 
 
@@ -4345,6 +5002,34 @@ String payload();
 ```
 
 
+
+#### Setup TCP KeepAlive for internal TCP client.
+
+param **`tcpKeepIdleSeconds`** lwIP TCP Keepalive idle in seconds.
+
+param **`tcpKeepIntervalSeconds`** lwIP TCP Keepalive interval in seconds.
+
+param **`tcpKeepCount`** lwIP TCP Keepalive count.
+
+For the TCP (KeepAlive) options, see [this doc](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-guides/lwip.html#tcp-options).
+
+If value of one of these parameters is zero, the TCP KeepAlive will be disabled.
+
+You can check the server connecting status, by exexuting `<FirebaseData>.httpConnected()` which will return true when connection to the server is still alive. 
+
+```cpp
+void keepAlive(int tcpKeepIdleSeconds, int tcpKeepIntervalSeconds, int tcpKeepCount);
+```
+
+
+
+#### Get TCP KeepAlive status.
+
+return **`Boolean`** status of TCP Keepalive.
+
+```cpp
+bool isKeepAlive();
+```
 
 ## FirebaseJSON object Functions
 
@@ -5253,7 +5938,7 @@ e.g. to<String>(), to<int>(), to<bool>()
 
 The MIT License (MIT)
 
-Copyright (c) 2021 K. Suwatchai (Mobizt)
+Copyright (c) 2024 K. Suwatchai (Mobizt)
 
 
 Permission is hereby granted, free of charge, to any person returning a copy of

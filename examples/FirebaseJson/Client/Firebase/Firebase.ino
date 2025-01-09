@@ -1,33 +1,35 @@
 
 /**
  * Created by K. Suwatchai (Mobizt)
- * 
- * Email: k_suwatchai@hotmail.com
- * 
- * Github: https://github.com/mobizt
- * 
- * Copyright (c) 2021 mobizt
  *
-*/
+ * Email: k_suwatchai@hotmail.com
+ *
+ * Github: https://github.com/mobizt/FirebaseJson
+ *
+ * Copyright (c) 2023 mobizt
+ *
+ */
 
-#if defined(ESP32)
+#include <Arduino.h>
+#if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #endif
+
 #include <Firebase_ESP_Client.h>
 
-//Provide the token generation process info.
+// Provide the token generation process info.
 #include <addons/TokenHelper.h>
 
-//Provide the RTDB payload printing info and other helper functions.
+// Provide the RTDB payload printing info and other helper functions.
 #include <addons/RTDBHelper.h>
 
 /* 1. Define the WiFi credentials */
 #define WIFI_SSID "WIFI_AP"
 #define WIFI_PASSWORD "WIFI_PASSWORD"
 
-//For the following credentials, see examples/Authentications/SignInAsUser/EmailPassword/EmailPassword.ino
+// For the following credentials, see examples/Authentications/SignInAsUser/EmailPassword/EmailPassword.ino
 
 /* 2. Define the API Key */
 #define API_KEY "API_KEY"
@@ -39,7 +41,7 @@
 #define USER_EMAIL "USER_EMAIL"
 #define USER_PASSWORD "USER_PASSWORD"
 
-//Define Firebase Data object
+// Define Firebase Data object
 FirebaseData fbdo;
 
 FirebaseAuth auth;
@@ -79,22 +81,28 @@ void setup()
     config.database_url = DATABASE_URL;
 
     /* Assign the callback function for the long running token generation task */
-    config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+    config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
 
-    //Or use legacy authenticate method
-    //config.database_url = DATABASE_URL;
-    //config.signer.tokens.legacy_token = "<database secret>";
+    // Since Firebase v4.4.x, BearSSL engine was used, the SSL buffer need to be set.
+    // Large data transmission may require larger RX buffer, otherwise connection issue or data read time out can be occurred.
+    fbdo.setBSSLBufferSize(2048 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
+
+    // Or use legacy authenticate method
+    // config.database_url = DATABASE_URL;
+    // config.signer.tokens.legacy_token = "<database secret>";
 
     Firebase.begin(&config, &auth);
 
-    //Comment or pass false value when WiFi reconnection will control by your code or third party library
-    Firebase.reconnectWiFi(true);
+    // Comment or pass false value when WiFi reconnection will control by your code or third party library e.g. WiFiManager
+    Firebase.reconnectNetwork(true);
 }
 
 void loop()
 {
-    //Flash string (PROGMEM and  (FPSTR), String C/C++ string, const char, char array, string literal are supported
-    //in all Firebase and FirebaseJson functions, unless F() macro is not supported.
+    // Flash string (PROGMEM and  (FPSTR), String C/C++ string, const char, char array, string literal are supported
+    // in all Firebase and FirebaseJson functions, unless F() macro is not supported.
+
+    // Firebase.ready() should be called repeatedly to handle authentication tasks.
 
     if (Firebase.ready() && (millis() - sendDataPrevMillis > 15000 || sendDataPrevMillis == 0))
     {

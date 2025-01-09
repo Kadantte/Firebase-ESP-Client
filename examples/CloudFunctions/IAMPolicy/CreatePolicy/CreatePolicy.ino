@@ -1,34 +1,41 @@
 
 /**
  * Created by K. Suwatchai (Mobizt)
- * 
- * Email: k_suwatchai@hotmail.com
- * 
- * Github: https://github.com/mobizt
- * 
- * Copyright (c) 2021 mobizt
  *
-*/
+ * Email: k_suwatchai@hotmail.com
+ *
+ * Github: https://github.com/mobizt/Firebase-ESP-Client
+ *
+ * Copyright (c) 2023 mobizt
+ *
+ */
 
 /** This example shows how to create IAM Policy used in Cloud Function creation.
  * The helper class PolicyBuilder used in policy JSON object generation
-*/
-
-#if defined(ESP32)
+ */
+#include <Arduino.h>
+#if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
+#elif __has_include(<WiFiNINA.h>)
+#include <WiFiNINA.h>
+#elif __has_include(<WiFi101.h>)
+#include <WiFi101.h>
+#elif __has_include(<WiFiS3.h>)
+#include <WiFiS3.h>
 #endif
+
 #include <Firebase_ESP_Client.h>
 
-//Define Firebase Data object
+// Define Firebase Data object
 FirebaseData fbdo;
 
 FirebaseAuth auth;
 FirebaseConfig config;
 
-//We need to define the PolicyBuilder, Binding AuditConfig, and AuditLogConfig data to keep the function and triggers configuaration and IAM policy.
-//These objects should declare as global objects or static to prevent the stack overflow.
+// We need to define the PolicyBuilder, Binding AuditConfig, and AuditLogConfig data to keep the function and triggers configuaration and IAM policy.
+// These objects should declare as global objects or static to prevent the stack overflow.
 PolicyBuilder policy;
 Binding binding;
 AuditConfig audit_config;
@@ -43,8 +50,8 @@ void setup()
 
     Firebase.begin(&config, &auth);
 
-    //This will create the policy JSON object as in this document
-    //https://cloud.google.com/iam/docs/reference/rest/v1/Policy
+    // This will create the policy JSON object as in this document
+    // https://cloud.google.com/iam/docs/reference/rest/v1/Policy
 
     policy.setETag("BwWWja0YfJA=");
     policy.setVersion(3);
@@ -64,7 +71,7 @@ void setup()
     audit_config.setService("allServices");
 
     audit_log_config.setLogType("DATA_READ");
-    audit_log_config.addexemptedMembers("user:jose@example.com");
+    audit_log_config.addExemptedMembers("user:jose@example.com");
     audit_config.addAuditLogConfig(&audit_log_config, true);
 
     audit_log_config.setLogType("DATA_WRITE");
@@ -81,7 +88,7 @@ void setup()
     audit_config.addAuditLogConfig(&audit_log_config, true);
 
     audit_log_config.setLogType("DATA_WRITE");
-    audit_log_config.addexemptedMembers("user:aliya@example.com");
+    audit_log_config.addExemptedMembers("user:aliya@example.com");
     audit_config.addAuditLogConfig(&audit_log_config, true);
 
     policy.addAuditConfig(&audit_config, true);

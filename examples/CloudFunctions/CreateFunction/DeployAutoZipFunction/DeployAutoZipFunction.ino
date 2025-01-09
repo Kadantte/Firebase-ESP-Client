@@ -1,52 +1,59 @@
 
 /**
  * Created by K. Suwatchai (Mobizt)
- * 
- * Email: k_suwatchai@hotmail.com
- * 
- * Github: https://github.com/mobizt
- * 
- * Copyright (c) 2021 mobizt
  *
-*/
+ * Email: k_suwatchai@hotmail.com
+ *
+ * Github: https://github.com/mobizt/Firebase-ESP-Client
+ *
+ * Copyright (c) 2023 mobizt
+ *
+ */
 
 /** Prerequisites
- * 
+ *
  * Cloud Functions deployment requires the pay-as-you-go (Blaze) billing plan.
- * 
+ *
  * IAM owner permission required for service account used and Cloud Build API must be enabled,
  * https://github.com/mobizt/Firebase-ESP-Client#iam-permission-and-api-enable
-*/
+ */
 
 /* Cloud Functions deployment requires the pay-as-you-go (Blaze) billing plan. */
 
-/** The code in this example used to deploy the autozip backend Cloud function used in the source code files deployment. 
- * 
+/** The code in this example used to deploy the autozip backend Cloud function used in the source code files deployment.
+ *
  * This operation required OAUth2.0 authentication.
-*/
+ */
 
 /** The pointer, points to the operation info assigned to the create function will provide the progress of deployment that can be accessed later.
- * 
+ *
  * After you run this example code, you can now deploy sources files in any foder (path).
  * The autozip function will compress the source code files in the defined folder and upload to the admin account Cloud Storage data bucket.
-*/
+ */
 
 /** Due to the processing power in ESP8266 is weaker than ESP32, the OAuth2.0 token generation takes time then this example
  * will check for token to be ready in loop prior to create the Cloud Function.
- * 
+ *
  * The Cloud Function creation (deploy) is the long running operation,
  * the final result may fail due to bugs in the user function, missing dependencies,
  * and incorrect configurations.
-*/
-
-#if defined(ESP32)
+ */
+#include <Arduino.h>
+#if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
+#elif __has_include(<WiFiNINA.h>)
+#include <WiFiNINA.h>
+#elif __has_include(<WiFi101.h>)
+#include <WiFi101.h>
+#elif __has_include(<WiFiS3.h>)
+#include <WiFiS3.h>
 #endif
+
 #include <Firebase_ESP_Client.h>
 
-//Provide the token generation process info.
+// Provide the token generation process info.
 #include <addons/TokenHelper.h>
 
 #include "AutoZip.h"
@@ -56,18 +63,18 @@
 #define WIFI_PASSWORD "WIFI_PASSWORD"
 
 /** 2. Define the Service Account credentials (required for token generation)
- * 
+ *
  * This information can be taken from the service account JSON file.
- * 
- * To download service account file, from the Firebase console, goto project settings, 
+ *
+ * To download service account file, from the Firebase console, goto project settings,
  * select "Service accounts" tab and click at "Generate new private key" button
-*/
+ */
 #define FIREBASE_PROJECT_ID "PROJECT_ID"
 #define FIREBASE_CLIENT_EMAIL "CLIENT_EMAIL"
 const char PRIVATE_KEY[] PROGMEM = "-----BEGIN PRIVATE KEY-----XXXXXXXXXXXX-----END PRIVATE KEY-----\n";
 
 /* 3. Define the project location e.g. us-central1 or asia-northeast1 */
-//https://firebase.google.com/docs/projects/locations
+// https://firebase.google.com/docs/projects/locations
 #define PROJECT_LOCATION "PROJECT_LOCATION"
 
 /* 4. Define the Firebase storage bucket ID e.g bucket-name.appspot.com */
@@ -76,7 +83,7 @@ const char PRIVATE_KEY[] PROGMEM = "-----BEGIN PRIVATE KEY-----XXXXXXXXXXXX-----
 /* 5. If work with RTDB, define the RTDB URL */
 #define DATABASE_URL "URL" //<databaseName>.firebaseio.com or <databaseName>.<region>.firebasedatabase.app
 
-//Define Firebase Data object
+// Define Firebase Data object
 FirebaseData fbdo;
 
 FirebaseAuth auth;
@@ -89,6 +96,10 @@ FunctionsConfig function_config(FIREBASE_PROJECT_ID, PROJECT_LOCATION, STORAGE_B
 bool taskCompleted = false;
 
 unsigned long dataMillis = 0;
+
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+WiFiMulti multi;
+#endif
 
 /* The function to create and deploy Cloud Function */
 void creatFunction();
@@ -104,12 +115,23 @@ void setup()
 
     Serial.begin(115200);
 
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+    multi.addAP(WIFI_SSID, WIFI_PASSWORD);
+    multi.run();
+#else
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
     Serial.print("Connecting to Wi-Fi");
+    unsigned long ms = millis();
     while (WiFi.status() != WL_CONNECTED)
     {
         Serial.print(".");
         delay(300);
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+        if (millis() - ms > 10000)
+            break;
+#endif
     }
     Serial.println();
     Serial.print("Connected with IP: ");
@@ -123,19 +145,38 @@ void setup()
     config.service_account.data.project_id = FIREBASE_PROJECT_ID;
     config.service_account.data.private_key = PRIVATE_KEY;
 
+    // The WiFi credentials are required for Pico W
+    // due to it does not have reconnect feature.
+#if defined(ARDUINO_RASPBERRY_PI_PICO_W)
+    config.wifi.clearAP();
+    config.wifi.addAP(WIFI_SSID, WIFI_PASSWORD);
+#endif
+
     /* Assign the RTDB URL */
     config.database_url = DATABASE_URL;
 
     /* Assign the callback function for the long running token generation task */
-    config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
+    config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h
+
+    // Comment or pass false value when WiFi reconnection will control by your code or third party library e.g. WiFiManager
+    Firebase.reconnectNetwork(true);
+
+    // Since v4.4.x, BearSSL engine was used, the SSL buffer need to be set.
+    // Large data transmission may require larger RX buffer, otherwise connection issue or data read time out can be occurred.
+    fbdo.setBSSLBufferSize(4096 /* Rx buffer size in bytes from 512 - 16384 */, 1024 /* Tx buffer size in bytes from 512 - 16384 */);
 
     Firebase.begin(&config, &auth);
-    
-    Firebase.reconnectWiFi(true);
 }
 
 void loop()
 {
+    // Firebase.ready() should be called repeatedly to handle authentication tasks.
+
+#if !defined(ESP32) && !defined(ESP8266)
+    if (Firebase.ready())
+        Firebase.Functions.runDeployTasks();
+#endif
+
     if (Firebase.ready() && !taskCompleted)
     {
         deployAutoZip();
@@ -156,7 +197,7 @@ void deployAutoZip()
     function_config.setSource(FB_AUTOZIP /* flash memory data of zip file */, sizeof(FB_AUTOZIP) /* size of data in bytes */);
     function_config.setIngressSettings("ALLOW_ALL");
 
-    //Set up the IAM policy
+    // Set up the IAM policy
     binding.setRole("roles/cloudfunctions.invoker");
     binding.addMember("allUsers");
     policy.addBinding(&binding);
@@ -169,24 +210,24 @@ void deployAutoZip()
 /* The function to show the Cloud Function deployment status */
 void functionCreationCallback(FunctionsOperationStatusInfo statusInfo)
 {
-    if (statusInfo.status == fb_esp_functions_operation_status_unknown)
+    if (statusInfo.status == firebase_functions_operation_status_unknown)
         Serial.printf("%s: Unknown\n", statusInfo.functionId.c_str());
-    else if (statusInfo.status == fb_esp_functions_operation_status_generate_upload_url)
+    else if (statusInfo.status == firebase_functions_operation_status_generate_upload_url)
         Serial.printf("%s: Generate the upload Url...\n", statusInfo.functionId.c_str());
-    else if (statusInfo.status == fb_esp_functions_operation_status_upload_source_file_in_progress)
+    else if (statusInfo.status == firebase_functions_operation_status_upload_source_file_in_progress)
         Serial.printf("%s: Uploading file...\n", statusInfo.functionId.c_str());
-    else if (statusInfo.status == fb_esp_functions_operation_status_deploy_in_progress)
+    else if (statusInfo.status == firebase_functions_operation_status_deploy_in_progress)
         Serial.printf("%s: Deploying function...\n", statusInfo.functionId.c_str());
-    else if (statusInfo.status == fb_esp_functions_operation_status_set_iam_policy_in_progress)
+    else if (statusInfo.status == firebase_functions_operation_status_set_iam_policy_in_progress)
         Serial.printf("%s: Set the IAM policy...\n", statusInfo.functionId.c_str());
-    else if (statusInfo.status == fb_esp_functions_operation_status_delete_in_progress)
+    else if (statusInfo.status == firebase_functions_operation_status_delete_in_progress)
         Serial.printf("%s: Delete the function...\n", statusInfo.functionId.c_str());
-    else if (statusInfo.status == fb_esp_functions_operation_status_finished)
+    else if (statusInfo.status == firebase_functions_operation_status_finished)
     {
         Serial.printf("%s: success\n", statusInfo.functionId.c_str());
         Serial.println();
     }
-    else if (statusInfo.status == fb_esp_functions_operation_status_error)
+    else if (statusInfo.status == firebase_functions_operation_status_error)
     {
         Serial.printf("%s: Error, ", statusInfo.functionId.c_str());
         Serial.println(statusInfo.errorMsg.c_str());

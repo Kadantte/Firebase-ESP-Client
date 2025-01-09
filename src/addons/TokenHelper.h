@@ -2,83 +2,68 @@
 #define TOKEN_HElPER_H
 
 #include <Arduino.h>
-#if defined(ESP32)
-#if defined(FIREBASE_ESP32_CLIENT)
-#include <FirebaseESP32.h>
-#endif
-#elif defined(ESP8266)
-#if defined(FIREBASE_ESP8266_CLIENT)
-#include <FirebaseESP8266.h>
-#endif
-#endif
+#include "FirebaseFS.h"
 
-#if defined(FIREBASE_ESP_CLIENT)
-#include <Firebase_ESP_Client.h>
-#endif
+#include <Firebase.h>
 
-//This header file includes the functions that provide the token generation process info.
+// This header file includes the functions that provide the token generation process info.
 
 /* The helper function to get the token type string */
-String getTokenType(struct token_info_t info)
+const char *getTokenType(struct token_info_t info)
 {
     switch (info.type)
     {
     case token_type_undefined:
-        return (const char *)FPSTR("undefined");
+        return "undefined";
 
     case token_type_legacy_token:
-        return (const char *)FPSTR("legacy token");
+        return "legacy token";
 
     case token_type_id_token:
-        return (const char *)FPSTR("id token");
+        return "id token (GITKit token)";
 
     case token_type_custom_token:
-        return (const char *)FPSTR("custom token");
+        return "custom token";
 
     case token_type_oauth2_access_token:
-        return (const char*)FPSTR("OAuth2.0 access token");
+        return "OAuth2.0 access token";
 
     default:
         break;
     }
-    return (const char *)FPSTR("undefined");
+    return "undefined";
 }
 
 /* The helper function to get the token status string */
-String getTokenStatus(struct token_info_t info)
+const char *getTokenStatus(struct token_info_t info)
 {
     switch (info.status)
     {
     case token_status_uninitialized:
-        return (const char*)FPSTR("uninitialized");
+        return "uninitialized";
 
     case token_status_on_initialize:
-        return (const char *)FPSTR("on initializing\n** NTP time acquiring **\n** If this takes time too long, set the time manually before calling Firebase.begin **\n");
+        return "on initializing";
 
     case token_status_on_signing:
-
-#if defined(ESP32)
-        return (const char*)FPSTR("on signing");
-#elif defined(ESP8266)
-        return (const char *)FPSTR("on signing\n** wdt reset may be occurred at this stage due to the blocking code in the token generation process **\n");
-#endif
+        return "on signing";
 
     case token_status_on_request:
-        return (const char*)FPSTR("on request");
+        return "on request";
 
     case token_status_on_refresh:
-        return (const char*)FPSTR("on refreshing");
+        return "on refreshing";
 
     case token_status_ready:
-        return (const char*)FPSTR("ready");
+        return "ready";
 
     case token_status_error:
-        return (const char*)FPSTR("error");
+        return "error";
 
     default:
         break;
     }
-    return (const char *)FPSTR("uninitialized");
+    return "uninitialized";
 }
 
 /* The helper function to get the token error string */
@@ -93,7 +78,7 @@ String getTokenError(struct token_info_t info)
 
 void tokenStatusCallback(TokenInfo info)
 {
-    /** fb_esp_auth_token_status enum
+    /** firebase_auth_token_status enum
      * token_status_uninitialized,
      * token_status_on_initialize,
      * token_status_on_signing,
@@ -101,15 +86,15 @@ void tokenStatusCallback(TokenInfo info)
      * token_status_on_refresh,
      * token_status_ready,
      * token_status_error
-    */
+     */
     if (info.status == token_status_error)
     {
-        Serial.printf((const char *)FPSTR("Token info: type = %s, status = %s\n"), getTokenType(info).c_str(), getTokenStatus(info).c_str());
-        Serial.printf((const char *)FPSTR("Token error: %s\n"), getTokenError(info).c_str());
+        Serial_Printf("Token info: type = %s, status = %s\n", getTokenType(info), getTokenStatus(info));
+        Serial_Printf("Token error: %s\n", getTokenError(info).c_str());
     }
     else
     {
-        Serial.printf((const char *)FPSTR("Token info: type = %s, status = %s\n"), getTokenType(info).c_str(), getTokenStatus(info).c_str());
+        Serial_Printf("Token info: type = %s, status = %s\n", getTokenType(info), getTokenStatus(info));
     }
 }
 

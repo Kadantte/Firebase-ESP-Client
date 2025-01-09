@@ -1,41 +1,38 @@
+
 /**
- * Google's Cloud Functions class, Functions.cpp version 1.1.6
- * 
- * This library supports Espressif ESP8266 and ESP32
- * 
- * Created December 10, 2021
- * 
- * This work is a part of Firebase ESP Client library
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
+ * Google's Cloud Functions class, Functions.cpp version 1.1.26
+ *
+ * Created September 13, 2023
+ *
  * The MIT License (MIT)
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
- * 
+ * Copyright (c) 2023 K. Suwatchai (Mobizt)
+ *
+ *
  * Permission is hereby granted, free of charge, to any person returning a copy of
  * this software and associated documentation files (the "Software"), to deal in
  * the Software without restriction, including without limitation the rights to
  * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
  * the Software, and to permit persons to whom the Software is furnished to do so,
  * subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+ */
 
-#include "FirebaseFS.h"
+#include "./FirebaseFS.h"
 
-#ifdef ENABLE_FB_FUNCTIONS
+#if defined(ENABLE_FB_FUNCTIONS) || defined(FIREBASE_ENABLE_FB_FUNCTIONS)
 
 #ifndef _FB_FUNCTIONS_CPP_
 #define _FB_FUNCTIONS_CPP_
+
 #include "FB_Functions.h"
 
 FB_Functions::FB_Functions()
@@ -46,37 +43,37 @@ FB_Functions::~FB_Functions()
 {
 }
 
-bool FB_Functions::mCallFunction(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *functionId, const char *data)
+void FB_Functions::makeRequest(struct firebase_functions_req_t &req, firebase_functions_request_type type,
+                               MB_StringPtr projectId, MB_StringPtr locationId, MB_StringPtr functionId)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_call;
+    req.requestType = type;
     req.projectId = projectId;
     req.locationId = locationId;
     req.functionId = functionId;
+}
 
-    MBSTRING find;
-    ut->appendP(find, fb_esp_pgm_str_3);
-    MBSTRING replace;
-    ut->appendP(replace, fb_esp_pgm_str_570);
+bool FB_Functions::mCallFunction(FirebaseData *fbdo, MB_StringPtr projectId, MB_StringPtr locationId,
+                                 MB_StringPtr functionId, MB_StringPtr data)
+{
+    struct firebase_functions_req_t req;
+
+    makeRequest(req, firebase_functions_request_type_call, projectId, locationId, functionId);
+
     req.payload = data;
-    ut->replaceAll(req.payload, find, replace);
+    fbdo->initJson();
 
-    char *tmp = ut->strP(fb_esp_pgm_str_135);
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_pgm_str_67 /* "data" */, req.payload);
 
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
+    Core.jh.toString(fbdo->session.jsonPtr, req.payload, true);
 
-    fbdo->_ss.jsonPtr->clear();
-    fbdo->_ss.jsonPtr->add(tmp, req.payload.c_str());
-    req.payload = fbdo->_ss.jsonPtr->raw();
-    fbdo->_ss.jsonPtr->clear();
-    ut->delP(&tmp);
     return sendRequest(fbdo, &req);
 }
 
-void FB_Functions::addCreationTask(FirebaseData *fbdo, FunctionsConfig *config, bool patch, fb_esp_functions_creation_step step, fb_esp_functions_creation_step nextStep, FunctionsOperationCallback callback, FunctionsOperationStatusInfo *statusInfo)
+void FB_Functions::addCreationTask(FirebaseData *fbdo, FunctionsConfig *config, bool patch,
+                                   firebase_functions_creation_step step, firebase_functions_creation_step nextStep,
+                                   FunctionsOperationCallback callback, FunctionsOperationStatusInfo *statusInfo)
 {
-    struct fb_esp_deploy_task_info_t taskInfo;
+    struct firebase_deploy_task_info_t taskInfo;
     taskInfo.step = step;
     taskInfo.nextStep = nextStep;
     taskInfo.fbdo = fbdo;
@@ -90,7 +87,7 @@ void FB_Functions::addCreationTask(FirebaseData *fbdo, FunctionsConfig *config, 
     if (statusInfo)
     {
         taskInfo.statusInfo = statusInfo;
-        taskInfo.statusInfo->status = fb_esp_functions_operation_status_deploy_in_progress;
+        taskInfo.statusInfo->status = firebase_functions_operation_status_deploy_in_progress;
     }
     if (config->_policy)
     {
@@ -98,129 +95,117 @@ void FB_Functions::addCreationTask(FirebaseData *fbdo, FunctionsConfig *config, 
         taskInfo.policy = config->_policy->raw();
     }
     _deployTasks.push_back(taskInfo);
-    fbdo->_ss.long_running_task++;
+    fbdo->session.long_running_task++;
 
     _creation_task_enable = true;
 
-    if (_deployTasks.size() == 1)
+    // Allow running in FreeRTOS loop task?, add to loop task.
+    if (Core.internal.deploy_loop_task_enable)
     {
-
-#if defined(ESP32)
-        char *tmp = ut->strP(fb_esp_pgm_str_475);
-        runDeployTask(tmp);
-        ut->delP(&tmp);
-#elif defined(ESP8266)
-        runDeployTask();
-#endif
+        // The first task?, running in loop task by default
+        if (_deployTasks.size() == 1)
+            runDeployTask();
     }
+    else // User intends to run task manually, run immediately.
+        mDeployTasks();
 }
 
 bool FB_Functions::createFunction(FirebaseData *fbdo, FunctionsConfig *config, FunctionsOperationStatusInfo *statusInfo)
 {
-    return createFunctionInt(fbdo, config->_name.c_str(), config, false, NULL, statusInfo);
+    return createFunctionInt(fbdo, toStringPtr(config->_name), config, false, NULL, statusInfo);
 }
 
 bool FB_Functions::createFunction(FirebaseData *fbdo, FunctionsConfig *config, FunctionsOperationCallback callback)
 {
-    return createFunctionInt(fbdo, config->_name.c_str(), config, false, callback, nullptr);
+    return createFunctionInt(fbdo, toStringPtr(config->_name), config, false, callback, nullptr);
 }
 
-bool FB_Functions::mPatchFunction(FirebaseData *fbdo, const char *functionId, FunctionsConfig *patchData)
+bool FB_Functions::mPatchFunction(FirebaseData *fbdo, MB_StringPtr functionId, FunctionsConfig *patchData)
 {
     return createFunctionInt(fbdo, functionId, patchData, true, NULL, nullptr);
 }
 
-bool FB_Functions::createFunctionInt(FirebaseData *fbdo, const char *functionId, FunctionsConfig *config, bool patch, FunctionsOperationCallback cb, FunctionsOperationStatusInfo *info)
+bool FB_Functions::createFunctionInt(FirebaseData *fbdo, MB_StringPtr functionId,
+                                     FunctionsConfig *config, bool patch, FunctionsOperationCallback cb,
+                                     FunctionsOperationStatusInfo *info)
 {
+    Core.internal.deploy_loop_task_enable = true;
 
     if (patch)
-    {
-        fbdo->_ss.cfn.cbInfo.functionId = functionId;
-    }
+        fbdo->session.cfn.cbInfo.functionId = functionId;
     else
     {
-        if (strlen(functionId) > 0)
-            fbdo->_ss.cfn.cbInfo.functionId = functionId;
+        MB_String _functionId = functionId;
+        if (_functionId.length() > 0)
+            fbdo->session.cfn.cbInfo.functionId = functionId;
         else if (config->_entryPoint.length() > 0)
-            fbdo->_ss.cfn.cbInfo.functionId = config->_entryPoint;
+            fbdo->session.cfn.cbInfo.functionId = config->_entryPoint;
     }
 
-    if (config->_sourceType == functions_sources_type_local_archive || config->_sourceType == functions_sources_type_flash_data)
+    if (config->_sourceType == functions_sources_type_local_archive ||
+        config->_sourceType == functions_sources_type_flash_data)
     {
         if (config->_sourceType == functions_sources_type_local_archive)
         {
-            if (config->_uploadArchiveStorageType == mem_storage_type_sd)
+            if (config->_uploadArchiveStorageType == mem_storage_type_undefined)
+                config->_uploadArchiveStorageType = mem_storage_type_flash;
+
+            fbdo->session.cfn.filepath = config->_uploadArchiveFile;
+            fbdo->session.cfn.storageType = config->_uploadArchiveStorageType;
+
+            int sz = Core.mbfs.open(config->_uploadArchiveFile, mbfs_type config->_uploadArchiveStorageType,
+                                       mb_fs_open_mode_read);
+
+            if (sz < 0)
             {
-                if (!ut->sdTest(Signer.getCfg()->_int.fb_file))
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                    sendCallback(fbdo, fb_esp_functions_operation_status_error, fbdo->errorReason().c_str(), cb, info);
-                    return false;
-                }
-#if defined SD_FS
-                if (!SD_FS.exists(config->_uploadArchiveFile.c_str()))
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_ARCHIVE_NOT_FOUND;
-                    sendCallback(fbdo, fb_esp_functions_operation_status_error, fbdo->errorReason().c_str(), cb, info);
-                    return false;
-                }
-                Signer.getCfg()->_int.fb_file = SD_FS.open(config->_uploadArchiveFile.c_str(), FILE_READ);
-#else
-                return false;
-#endif
-
-            }
-            else if (config->_uploadArchiveStorageType == mem_storage_type_flash)
-            {
-               
-#if defined FLASH_FS
-
-                if (!Signer.getCfg()->_int.fb_flash_rdy)
-                    ut->flashTest();
-
-                if (!Signer.getCfg()->_int.fb_flash_rdy || !FLASH_FS.exists(config->_uploadArchiveFile.c_str()))
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_ARCHIVE_NOT_FOUND;
-                    sendCallback(fbdo, fb_esp_functions_operation_status_error, fbdo->errorReason().c_str(), cb, info);
-                    return false;
-                }
-
-                Signer.getCfg()->_int.fb_file = FLASH_FS.open(config->_uploadArchiveFile.c_str(), "r");
-#else
-                return false;
-#endif
-                
-            }
-
-            if (!Signer.getCfg()->_int.fb_file)
-            {
-                fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                sendCallback(fbdo, fb_esp_functions_operation_status_error, fbdo->errorReason().c_str(), cb, info);
+                fbdo->session.response.code = MB_FS_ERROR_FILE_IO_ERROR;
+                fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                fbdo->session.cfn.cbInfo.errorMsg = fbdo->errorReason().c_str();
+                sendCallback(fbdo, cb, info);
                 return false;
             }
+
+            fbdo->session.cfn.fileSize = sz;
         }
+        // Fix in ESP32 core 2.0.x
+        Core.mbfs.close(mbfs_type config->_uploadArchiveStorageType);
 
-        addCreationTask(fbdo, config, patch, fb_esp_functions_creation_step_gen_upload_url, fb_esp_functions_creation_step_upload_zip_file, cb, info);
+        addCreationTask(fbdo, config, patch, firebase_functions_creation_step_gen_upload_url,
+                        firebase_functions_creation_step_upload_zip_file, cb, info);
         return true;
     }
     else if (config->_sourceType == functions_sources_type_storage_bucket_sources)
     {
 
-        addCreationTask(fbdo, config, patch, fb_esp_functions_creation_step_upload_source_files, fb_esp_functions_creation_step_deploy, cb, info);
+        addCreationTask(fbdo, config, patch, firebase_functions_creation_step_upload_source_files,
+                        firebase_functions_creation_step_deploy, cb, info);
         return true;
     }
     else
     {
         bool ret = false;
-        fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_deploy_in_progress;
-        sendCallback(fbdo, fbdo->_ss.cfn.cbInfo.status, "", cb, info);
-        ret = deploy(fbdo, functionId, config, patch);
-        fbdo->_ss.cfn.cbInfo.triggerUrl = config->_httpsTriggerUrl;
+        fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_deploy_in_progress;
+        fbdo->session.cfn.cbInfo.errorMsg.clear();
+        sendCallback(fbdo, cb, info);
+        MB_String _functionId = functionId;
+        ret = deploy(fbdo, _functionId.c_str(), config, patch);
+        fbdo->session.cfn.cbInfo.triggerUrl = config->_httpsTriggerUrl;
+        if (info)
+            info->triggerUrl = config->_httpsTriggerUrl;
+
+        if (!ret)
+        {
+            fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+            fbdo->session.cfn.cbInfo.errorMsg = fbdo->session.error.c_str();
+            sendCallback(fbdo, cb, info);
+        }
 
         if (ret && config->_policy)
-            addCreationTask(fbdo, config, patch, fb_esp_functions_creation_step_polling_status, fb_esp_functions_creation_step_set_iam_policy, cb, info);
+            addCreationTask(fbdo, config, patch, firebase_functions_creation_step_polling_status,
+                            firebase_functions_creation_step_set_iam_policy, cb, info);
         else if (ret)
-            addCreationTask(fbdo, config, patch, fb_esp_functions_creation_step_polling_status, fb_esp_functions_creation_step_idle, cb, info);
+            addCreationTask(fbdo, config, patch, firebase_functions_creation_step_polling_status,
+                            firebase_functions_creation_step_idle, cb, info);
         return ret;
     }
 
@@ -229,52 +214,22 @@ bool FB_Functions::createFunctionInt(FirebaseData *fbdo, const char *functionId,
 
 bool FB_Functions::uploadSources(FirebaseData *fbdo, FunctionsConfig *config)
 {
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
+    fbdo->initJson();
 
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_2 /* "projectId" */, config->_projectId);
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_3 /* "location" */, config->_locationId);
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_5 /* "zip" */, MB_String(firebase_func_pgm_str_8 /* "tmp.zip" */));
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_6 /* "accessToken" */, Core.getToken());
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_7 /* "path" */, config->_bucketSourcesPath);
 
-    fbdo->_ss.jsonPtr->clear();
+    struct firebase_functions_req_t req;
 
-    char *tmp = nullptr;
+    req.requestType = firebase_functions_request_type_upload_bucket_sources;
 
-    tmp = ut->strP(fb_esp_pgm_str_387);
-    fbdo->_ss.jsonPtr->add(tmp, config->_projectId.c_str());
-    ut->delP(&tmp);
+    Core.jh.toString(fbdo->session.jsonPtr, req.payload, true);
 
-    tmp = ut->strP(fb_esp_pgm_str_409);
-    fbdo->_ss.jsonPtr->add(tmp, config->_locationId.c_str());
-    ut->delP(&tmp);
-
-    char *tmp2 = ut->strP(fb_esp_pgm_str_456);
-    tmp = ut->strP(fb_esp_pgm_str_453);
-    fbdo->_ss.jsonPtr->add(tmp, (const char *)tmp2);
-    ut->delP(&tmp);
-    ut->delP(&tmp2);
-
-    tmp = ut->strP(fb_esp_pgm_str_454);
-    fbdo->_ss.jsonPtr->add(tmp, Signer.getToken());
-    ut->delP(&tmp);
-
-    tmp = ut->strP(fb_esp_pgm_str_455);
-    fbdo->_ss.jsonPtr->add(tmp, config->_bucketSourcesPath.c_str());
-    ut->delP(&tmp);
-
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_upload_bucket_sources;
-
-    req.payload = fbdo->_ss.jsonPtr->raw();
-
-    fbdo->_ss.jsonPtr->clear();
-
-    req.host += config->_locationId.c_str();
-    ut->appendP(req.host, fb_esp_pgm_str_397);
-    req.host += config->_projectId.c_str();
-    ut->appendP(req.host, fb_esp_pgm_str_398);
-
-    ut->appendP(req.uri, fb_esp_pgm_str_1);
-    ut->appendP(req.uri, fb_esp_pgm_str_452);
+    Core.uh.addFunctionsHost(req.host, config->_locationId, config->_projectId,
+                                MB_String(firebase_func_pgm_str_4) /* "autozip" */, false);
 
     return sendRequest(fbdo, &req);
 }
@@ -282,658 +237,494 @@ bool FB_Functions::uploadSources(FirebaseData *fbdo, FunctionsConfig *config)
 bool FB_Functions::deploy(FirebaseData *fbdo, const char *functionId, FunctionsConfig *config, bool patch)
 {
 
-    struct fb_esp_functions_req_t req;
+    struct firebase_functions_req_t req;
+
     if (patch)
-    {
-        req.requestType = fb_esp_functions_request_type_patch;
         req.updateMask = &config->_updateMask;
-    }
-    else
-        req.requestType = fb_esp_functions_request_type_create;
 
-    req.projectId = config->_projectId.c_str();
-    req.locationId = config->_locationId.c_str();
-    req.functionId = functionId;
+    makeRequest(req, patch ? firebase_functions_request_type_patch : firebase_functions_request_type_create,
+                toStringPtr(config->_projectId), toStringPtr(config->_locationId),
+                toStringPtr(functionId));
 
-    MBSTRING path;
-    MBSTRING t;
+    MB_String str;
 
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
+    fbdo->initJson();
 
-    fbdo->_ss.jsonPtr->clear();
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_2 /* "projectId" */, config->_projectId);
+    Core.uh.host2Url(str, Core.config->database_url);
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_9 /* "databaseURL" */, str);
 
-    ut->appendP(path, fb_esp_pgm_str_387, true);
-    fbdo->_ss.jsonPtr->add(path.c_str(), config->_projectId.c_str());
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_10 /* "storageBucket" */, config->_bucketId);
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_func_pgm_str_11 /* "locationId" */, config->_locationId);
 
-    ut->appendP(path, fb_esp_pgm_str_388, true);
-    ut->appendP(t, fb_esp_pgm_str_112);
-    t += Signer.getCfg()->database_url.c_str();
-    fbdo->_ss.jsonPtr->add(path.c_str(), t.c_str());
+    str = firebase_func_pgm_str_12;  // "environmentVariables"
+    str += firebase_pgm_str_1;       // "/"
+    str += firebase_func_pgm_str_13; // "FIREBASE_CONFIG"
 
-    if (config->_bucketId.length() > 0)
-    {
-        ut->appendP(path, fb_esp_pgm_str_389, true);
-        fbdo->_ss.jsonPtr->add(path.c_str(), config->_bucketId.c_str());
-    }
+    Core.jh.addString(&config->_funcCfg, str.c_str(), fbdo->session.jsonPtr->raw());
+    Core.jh.clear(fbdo->session.jsonPtr);
 
-    if (config->_locationId.length() > 0)
-    {
-        ut->appendP(path, fb_esp_pgm_str_390, true);
-        fbdo->_ss.jsonPtr->add(path.c_str(), config->_locationId.c_str());
-    }
+    str = firebase_func_pgm_str_12;  // "environmentVariables"
+    str += firebase_pgm_str_1;       // "/"
+    str += firebase_func_pgm_str_14; // "GCLOUD_PROJECT"
 
-    t.clear();
-    MBSTRING str = fbdo->_ss.jsonPtr->raw();
-    fbdo->_ss.jsonPtr->clear();
-
-    char *find = ut->strP(fb_esp_pgm_str_3);
-    char *replace = ut->strP(fb_esp_pgm_str_396);
-    ut->replaceAll(str, find, replace);
-    ut->delP(&find);
-    ut->delP(&replace);
-
-    ut->appendP(t, fb_esp_pgm_str_374, true);
-    ut->appendP(t, fb_esp_pgm_str_1);
-    ut->appendP(t, fb_esp_pgm_str_386);
-
-    config->_funcCfg.set(t.c_str(), str.c_str());
+    Core.jh.addString(&config->_funcCfg, str.c_str(), config->_projectId);
 
     config->_httpsTriggerUrl.clear();
 
-    MBSTRING().swap(config->_httpsTriggerUrl);
-    MBSTRING().swap(str);
-
-    if (config->_triggerType == fb_esp_functions_trigger_type_https)
+    if (config->_triggerType == firebase_functions_trigger_type_https)
     {
-        t.clear();
-        ut->appendP(t, fb_esp_pgm_str_112);
-        t += config->_locationId.c_str();
-        ut->appendP(t, fb_esp_pgm_str_397);
-        t += config->_projectId.c_str();
-        ut->appendP(t, fb_esp_pgm_str_398);
-        ut->appendP(t, fb_esp_pgm_str_1);
-        t += config->_entryPoint;
-        char *tmp = ut->strP(fb_esp_pgm_str_384);
-        config->_funcCfg.set(tmp, t.c_str());
-        ut->delP(&tmp);
-        config->_httpsTriggerUrl = t;
-        MBSTRING().swap(t);
+        str.clear();
+
+        Core.uh.addFunctionsHost(str, config->_locationId, config->_projectId, config->_entryPoint, true);
+        Core.jh.addString(&config->_funcCfg, firebase_func_pgm_str_15 /* "httpsTrigger/url" */, str);
+        config->_httpsTriggerUrl = str;
+        str.clear();
     }
 
-    req.payload = config->_funcCfg.raw();
-    config->_funcCfg.clear();
-
+    Core.jh.toString(&config->_funcCfg, req.payload, true);
     return sendRequest(fbdo, &req);
 }
 
-void FB_Functions::sendCallback(FirebaseData *fbdo, fb_esp_functions_operation_status status, const char *message, FunctionsOperationCallback cb, FunctionsOperationStatusInfo *info)
+void FB_Functions::sendCallback(FirebaseData *fbdo, FunctionsOperationCallback cb, FunctionsOperationStatusInfo *info)
 {
-    if (fbdo->_ss.cfn.last_status == status)
+    if (fbdo->session.cfn.last_status == fbdo->session.cfn.cbInfo.status)
         return;
 
-    fbdo->_ss.cfn.last_status = status;
-
-    fbdo->_ss.cfn.cbInfo.status = status;
-    fbdo->_ss.cfn.cbInfo.errorMsg = message;
+    fbdo->session.cfn.last_status = fbdo->session.cfn.cbInfo.status;
 
     if (cb)
-        cb(fbdo->_ss.cfn.cbInfo);
+        cb(fbdo->session.cfn.cbInfo);
 
     if (info)
     {
-        info->errorMsg = fbdo->_ss.cfn.cbInfo.errorMsg;
-        info->status = fbdo->_ss.cfn.cbInfo.status;
+        info->errorMsg = fbdo->session.cfn.cbInfo.errorMsg;
+        info->status = fbdo->session.cfn.cbInfo.status;
+        info->functionId = fbdo->session.cfn.cbInfo.functionId;
+        info->triggerUrl = fbdo->session.cfn.cbInfo.triggerUrl;
     }
 }
 
-bool FB_Functions::mSetIamPolicy(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *functionId, PolicyBuilder *policy, const char *updateMask)
+bool FB_Functions::mSetIamPolicy(FirebaseData *fbdo, MB_StringPtr projectId,
+                                 MB_StringPtr locationId, MB_StringPtr functionId,
+                                 PolicyBuilder *policy, MB_StringPtr updateMask)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_set_iam_policy;
-    req.projectId = projectId;
-    req.locationId = locationId;
-    req.functionId = functionId;
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_set_iam_policy, projectId, locationId, functionId);
+    fbdo->initJson();
 
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
-
-    fbdo->_ss.jsonPtr->clear();
-
-    char *tmp = nullptr;
     if (policy)
-    {
-        static FirebaseJson js;
-        js.clear();
-        tmp = ut->strP(fb_esp_pgm_str_399);
-        fbdo->_ss.jsonPtr->add(tmp, policy->json);
-        ut->delP(&tmp);
-    }
+        Core.jh.addObject(fbdo->session.jsonPtr, firebase_func_pgm_str_16 /* "policy" */, &policy->json, true);
 
-    if (strlen(updateMask) > 0)
-    {
-        tmp = ut->strP(fb_esp_pgm_str_400);
-        fbdo->_ss.jsonPtr->add(tmp, updateMask);
-        ut->delP(&tmp);
-    }
-
-    req.payload = fbdo->_ss.jsonPtr->raw();
-    fbdo->_ss.jsonPtr->clear();
-
+    Core.jh.addString(fbdo->session.jsonPtr, firebase_pgm_str_70 /* "updateMask" */, MB_String(updateMask));
+    Core.jh.toString(fbdo->session.jsonPtr, req.payload, true);
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::mGetIamPolicy(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *functionId, const char *version)
+bool FB_Functions::mGetIamPolicy(FirebaseData *fbdo, MB_StringPtr projectId,
+                                 MB_StringPtr locationId, MB_StringPtr functionId, MB_StringPtr version)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_get_iam_policy;
-    req.projectId = projectId;
-    req.locationId = locationId;
-    req.functionId = functionId;
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_get_iam_policy, projectId, locationId, functionId);
     req.policyVersion = version;
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
-
-    fbdo->_ss.jsonPtr->clear();
-
+    fbdo->initJson();
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::mGetFunction(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *functionId)
+bool FB_Functions::mGetFunction(FirebaseData *fbdo, MB_StringPtr projectId, MB_StringPtr locationId, MB_StringPtr functionId)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_get;
-    req.projectId = projectId;
-    req.locationId = locationId;
-    req.functionId = functionId;
-    _function_status = fb_esp_functions_status_CLOUD_FUNCTION_STATUS_UNSPECIFIED;
-
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_get, projectId, locationId, functionId);
+    _function_status = firebase_functions_status_CLOUD_FUNCTION_STATUS_UNSPECIFIED;
     bool ret = sendRequest(fbdo, &req);
     if (ret)
     {
-        if (!fbdo->_ss.jsonPtr)
-            fbdo->_ss.jsonPtr = new FirebaseJson();
-
-        if (!fbdo->_ss.dataPtr)
-            fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-        fbdo->_ss.jsonPtr->clear();
-        fbdo->_ss.jsonPtr->setJsonData(fbdo->_ss.cfn.payload.c_str());
-        char *tmp = ut->strP(fb_esp_pgm_str_419);
-        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, (const char *)tmp);
-        ut->delP(&tmp);
-
-        if (fbdo->_ss.dataPtr->success)
+        fbdo->initJson();
+        Core.jh.setData(fbdo->session.jsonPtr, fbdo->session.cfn.payload, false);
+        if (Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, firebase_func_pgm_str_17 /* "status" */))
         {
-            MBSTRING s;
-            ut->appendP(s, fb_esp_pgm_str_420, true);
-            if (strcmp_P(fbdo->_ss.dataPtr->to<const char *>(), s.c_str()) == 0)
-                _function_status = fb_esp_functions_status_CLOUD_FUNCTION_STATUS_UNSPECIFIED;
+            if (strcmp_P(fbdo->session.dataPtr->to<const char *>(), firebase_func_pgm_str_18 /* "CLOUD_FUNCTION_STATUS_UNSPECIFIED" */) == 0)
+                _function_status = firebase_functions_status_CLOUD_FUNCTION_STATUS_UNSPECIFIED;
 
-            ut->appendP(s, fb_esp_pgm_str_421, true);
-            if (strcmp_P(fbdo->_ss.dataPtr->to<const char *>(), s.c_str()) == 0)
-                _function_status = fb_esp_functions_status_ACTIVE;
+            if (strcmp_P(fbdo->session.dataPtr->to<const char *>(), firebase_func_pgm_str_19 /* "ACTIVE" */) == 0)
+                _function_status = firebase_functions_status_ACTIVE;
 
-            ut->appendP(s, fb_esp_pgm_str_422, true);
-            if (strcmp_P(fbdo->_ss.dataPtr->to<const char *>(), s.c_str()) == 0)
-                _function_status = fb_esp_functions_status_OFFLINE;
+            if (strcmp_P(fbdo->session.dataPtr->to<const char *>(), firebase_func_pgm_str_20 /* "OFFLINE" */) == 0)
+                _function_status = firebase_functions_status_OFFLINE;
 
-            ut->appendP(s, fb_esp_pgm_str_423, true);
-            if (strcmp_P(fbdo->_ss.dataPtr->to<const char *>(), s.c_str()) == 0)
-                _function_status = fb_esp_functions_status_DEPLOY_IN_PROGRESS;
+            if (strcmp_P(fbdo->session.dataPtr->to<const char *>(), firebase_func_pgm_str_21 /* "DEPLOY_IN_PROGRESS" */) == 0)
+                _function_status = firebase_functions_status_DEPLOY_IN_PROGRESS;
 
-            ut->appendP(s, fb_esp_pgm_str_424, true);
-            if (strcmp_P(fbdo->_ss.dataPtr->to<const char *>(), s.c_str()) == 0)
-                _function_status = fb_esp_functions_status_DELETE_IN_PROGRESS;
+            if (strcmp_P(fbdo->session.dataPtr->to<const char *>(), firebase_func_pgm_str_22 /* "DELETE_IN_PROGRESS" */) == 0)
+                _function_status = firebase_functions_status_DELETE_IN_PROGRESS;
 
-            ut->appendP(s, fb_esp_pgm_str_425, true);
-            if (strcmp_P(fbdo->_ss.dataPtr->to<const char *>(), s.c_str()) == 0)
-                _function_status = fb_esp_functions_status_UNKNOWN;
-            MBSTRING().swap(s);
+            if (strcmp_P(fbdo->session.dataPtr->to<const char *>(), firebase_func_pgm_str_23 /*  "UNKNOWN" */) == 0)
+                _function_status = firebase_functions_status_UNKNOWN;
         }
     }
-
     return ret;
 }
 
-bool FB_Functions::mListFunctions(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *pageSize, const char *pageToken)
+bool FB_Functions::mListFunctions(FirebaseData *fbdo, MB_StringPtr projectId,
+                                  MB_StringPtr locationId, MB_StringPtr pageSize, MB_StringPtr pageToken)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_list;
-    req.projectId = projectId;
-    req.locationId = locationId;
-    req.pageSize = atoi(pageSize);
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_list, projectId, locationId, toStringPtr(""));
+    req.pageSize = atoi(stringPtr2Str(pageSize));
     req.pageToken = pageToken;
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::mListOperations(FirebaseData *fbdo, const char *filter, const char *pageSize, const char *pageToken)
+bool FB_Functions::mListOperations(FirebaseData *fbdo, MB_StringPtr filter, MB_StringPtr pageSize, MB_StringPtr pageToken)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_list_operations;
+    struct firebase_functions_req_t req;
+    req.requestType = firebase_functions_request_type_list_operations;
     req.filter = filter;
-    req.pageSize = atoi(pageSize);
+    req.pageSize = atoi(stringPtr2Str(pageSize));
     req.pageToken = pageToken;
-
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::mDeleteFunction(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *functionId)
+bool FB_Functions::mDeleteFunction(FirebaseData *fbdo, MB_StringPtr projectId, MB_StringPtr locationId, MB_StringPtr functionId)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_delete;
-    req.projectId = projectId;
-    req.locationId = locationId;
-    req.functionId = functionId;
-
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_delete, projectId, locationId, functionId);
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::mGenerateDownloadUrl(FirebaseData *fbdo, const char *projectId, const char *locationId, const char *functionId, const char *versionId)
+bool FB_Functions::mGenerateDownloadUrl(FirebaseData *fbdo, MB_StringPtr projectId,
+                                        MB_StringPtr locationId, MB_StringPtr functionId, MB_StringPtr versionId)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_gen_download_url;
-    req.projectId = projectId;
-    req.locationId = locationId;
-    req.functionId = functionId;
-    if (!fbdo->_ss.jsonPtr)
-        fbdo->_ss.jsonPtr = new FirebaseJson();
-
-    fbdo->_ss.jsonPtr->clear();
-
-    if (strlen(versionId) > 0)
-    {
-        req.versionId = atoi(versionId);
-        char *tmp = ut->strP(fb_esp_pgm_str_437);
-        fbdo->_ss.jsonPtr->add(tmp, (int)versionId);
-        ut->delP(&tmp);
-    }
-
-    req.payload = fbdo->_ss.jsonPtr->raw();
-    fbdo->_ss.jsonPtr->clear();
-
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_gen_download_url, projectId, locationId, functionId);
+    fbdo->initJson();
+    Core.jh.addNumberString(fbdo->session.jsonPtr, firebase_func_pgm_str_24 /* "versionId" */, MB_String(versionId));
+    Core.jh.toString(fbdo->session.jsonPtr, req.payload, true);
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::mGenerateUploadUrl(FirebaseData *fbdo, const char *projectId, const char *locationId)
+bool FB_Functions::mGenerateUploadUrl(FirebaseData *fbdo, MB_StringPtr projectId, MB_StringPtr locationId)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_gen_upload_url;
-    req.projectId = projectId;
-    req.locationId = locationId;
+    struct firebase_functions_req_t req;
+    makeRequest(req, firebase_functions_request_type_gen_upload_url, projectId, locationId, toStringPtr(""));
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Functions::uploadFile(FirebaseData *fbdo, const char *uploadUrl, const char *filePath, fb_esp_mem_storage_type storageType)
+bool FB_Functions::uploadFile(FirebaseData *fbdo, const char *uploadUrl, const char *filePath,
+                              firebase_mem_storage_type storageType)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_upload;
-
-    if (strlen(filePath) > 0)
-    {
-        if (filePath[0] != '/')
-            ut->appendP(req.filePath, fb_esp_pgm_str_1);
-    }
-
-    req.filePath += filePath;
+    struct firebase_functions_req_t req;
+    req.requestType = firebase_functions_request_type_upload;
+    Core.uh.addPath(req.filePath, MB_String(filePath));
     req.storageType = storageType;
 
-    struct fb_esp_url_info_t info;
-    ut->getUrlInfo(uploadUrl, info);
+    struct firebase_url_info_t info;
+    Core.uh.parse(&Core.mbfs, uploadUrl, info);
     req.host = info.host;
-    ut->appendP(req.uri, fb_esp_pgm_str_1);
+    req.uri = firebase_pgm_str_1; // "/"
     req.uri += info.uri;
     return sendRequest(fbdo, &req);
 }
 
 bool FB_Functions::uploadPGMArchive(FirebaseData *fbdo, const char *uploadUrl, const uint8_t *pgmArc, size_t pgmArcLen)
 {
-    struct fb_esp_functions_req_t req;
-    req.requestType = fb_esp_functions_request_type_pgm_upload;
-
+    struct firebase_functions_req_t req;
+    req.requestType = firebase_functions_request_type_pgm_upload;
     req.pgmArc = pgmArc;
     req.pgmArcLen = pgmArcLen;
 
-    struct fb_esp_url_info_t info;
-    ut->getUrlInfo(uploadUrl, info);
+    struct firebase_url_info_t info;
+    Core.uh.parse(&Core.mbfs, uploadUrl, info);
     req.host = info.host;
-    ut->appendP(req.uri, fb_esp_pgm_str_1);
+    req.uri = firebase_pgm_str_1; // "/"
     req.uri += info.uri;
     return sendRequest(fbdo, &req);
 }
 
-void FB_Functions::begin(UtilsClass *u)
+bool FB_Functions::sendRequest(FirebaseData *fbdo, struct firebase_functions_req_t *req)
 {
-    ut = u;
-}
+    fbdo->session.http_code = 0;
 
-bool FB_Functions::sendRequest(FirebaseData *fbdo, struct fb_esp_functions_req_t *req)
-{
-    if (!Signer.getCfg())
+    if (!Core.config)
     {
-        fbdo->_ss.http_code = FIREBASE_ERROR_UNINITIALIZED;
+        fbdo->session.response.code = FIREBASE_ERROR_UNINITIALIZED;
         return false;
     }
 
-#ifdef ENABLE_RTDB
-    if (fbdo->_ss.rtdb.pause)
+#if defined(ENABLE_RTDB) || defined(FIREBASE_ENABLE_RTDB)
+    if (fbdo->session.rtdb.pause)
         return true;
 #endif
 
-    if (!fbdo->reconnect())
+    if (!fbdo->reconnect() || !Core.tokenReady())
         return false;
 
-    if (!Signer.tokenReady())
+    if (Core.internal.fb_processing)
         return false;
 
-    if (Signer.getCfg()->_int.fb_processing)
-        return false;
-
-    Signer.getCfg()->_int.fb_processing = true;
-
+    Core.internal.fb_processing = true;
     fbdo->clear();
-
     connect(fbdo, req->host.c_str());
 
-    return functions_sendRequest(fbdo, req);
+    bool ret = functions_sendRequest(fbdo, req);
+
+    if (!ret)
+        fbdo->closeSession();
+
+    return ret;
 }
 
-bool FB_Functions::functions_sendRequest(FirebaseData *fbdo, struct fb_esp_functions_req_t *req)
+bool FB_Functions::functions_sendRequest(FirebaseData *fbdo, struct firebase_functions_req_t *req)
 {
     bool post = false;
-    fbdo->_ss.cfn.requestType = req->requestType;
+    fbdo->session.cfn.requestType = req->requestType;
 
-    MBSTRING header;
-    if (req->requestType == fb_esp_functions_request_type_get_iam_policy || req->requestType == fb_esp_functions_request_type_list_operations || req->requestType == fb_esp_functions_request_type_get || req->requestType == fb_esp_functions_request_type_get_iam_policy || req->requestType == fb_esp_functions_request_type_list)
-        ut->appendP(header, fb_esp_pgm_str_25);
-    else if (req->requestType == fb_esp_functions_request_type_upload_bucket_sources || req->requestType == fb_esp_functions_request_type_call || req->requestType == fb_esp_functions_request_type_create || req->requestType == fb_esp_functions_request_type_gen_download_url || req->requestType == fb_esp_functions_request_type_gen_upload_url || req->requestType == fb_esp_functions_request_type_set_iam_policy || req->requestType == fb_esp_functions_request_type_test_iam_policy)
-    {
-        ut->appendP(header, fb_esp_pgm_str_24);
-        post = true;
-    }
-    else if (req->requestType == fb_esp_functions_request_type_patch)
-    {
-        ut->appendP(header, fb_esp_pgm_str_26);
-        post = true;
-    }
-    else if (req->requestType == fb_esp_functions_request_type_delete)
-        ut->appendP(header, fb_esp_pgm_str_27);
-    else if (req->requestType == fb_esp_functions_request_type_upload || req->requestType == fb_esp_functions_request_type_pgm_upload)
-        ut->appendP(header, fb_esp_pgm_str_23);
+    MB_String header;
+    firebase_request_method method = http_undefined;
+    if (req->requestType == firebase_functions_request_type_get_iam_policy ||
+        req->requestType == firebase_functions_request_type_list_operations ||
+        req->requestType == firebase_functions_request_type_get ||
+        req->requestType == firebase_functions_request_type_get_iam_policy ||
+        req->requestType == firebase_functions_request_type_list)
+        method = http_get;
+    else if (req->requestType == firebase_functions_request_type_upload_bucket_sources ||
+             req->requestType == firebase_functions_request_type_call ||
+             req->requestType == firebase_functions_request_type_create ||
+             req->requestType == firebase_functions_request_type_gen_download_url ||
+             req->requestType == firebase_functions_request_type_gen_upload_url ||
+             req->requestType == firebase_functions_request_type_set_iam_policy ||
+             req->requestType == firebase_functions_request_type_test_iam_policy)
+        method = http_post;
+    else if (req->requestType == firebase_functions_request_type_patch)
+        method = http_patch;
+    else if (req->requestType == firebase_functions_request_type_delete)
+        method = http_delete;
+    else if (req->requestType == firebase_functions_request_type_upload ||
+             req->requestType == firebase_functions_request_type_pgm_upload)
+        method = http_put;
 
-    ut->appendP(header, fb_esp_pgm_str_6);
+    if (method != http_undefined)
+        post = Core.hh.addRequestHeaderFirst(header, method);
 
-    if (req->requestType == fb_esp_functions_request_type_upload_bucket_sources || req->requestType == fb_esp_functions_request_type_upload || req->requestType == fb_esp_functions_request_type_pgm_upload)
+    if (req->requestType == firebase_functions_request_type_upload_bucket_sources ||
+        req->requestType == firebase_functions_request_type_upload ||
+        req->requestType == firebase_functions_request_type_pgm_upload)
         header += req->uri;
-    else if (req->requestType == fb_esp_functions_request_type_list_operations)
+    else if (req->requestType == firebase_functions_request_type_list_operations)
     {
-        ut->appendP(header, fb_esp_pgm_str_426);
+        header += firebase_func_pgm_str_25; // "/v1/operations"
         bool hasParam = false;
 
-        if (req->filter.length() > 0)
-        {
-            hasParam = true;
-            ut->appendP(header, fb_esp_pgm_str_173);
-            ut->appendP(header, fb_esp_pgm_str_427);
-            header += req->filter;
-        }
+        Core.uh.addParam(header, firebase_func_pgm_str_26 /* "filter=" */, req->filter, hasParam);
 
         if (req->pageSize > 0)
-        {
-            if (hasParam)
-                ut->appendP(header, fb_esp_pgm_str_172);
-            else
-                ut->appendP(header, fb_esp_pgm_str_173);
-            ut->appendP(header, fb_esp_pgm_str_357);
-            ut->appendP(header, fb_esp_pgm_str_361);
-            header += NUM2S(req->pageSize).get();
-            hasParam = true;
-        }
+            Core.uh.addParam(header, firebase_pgm_str_63 /* "pageSize" */, MB_String(req->pageSize), hasParam);
 
-        if (req->pageToken.length() > 0)
-        {
-            if (hasParam)
-                ut->appendP(header, fb_esp_pgm_str_172);
-            else
-                ut->appendP(header, fb_esp_pgm_str_173);
-            ut->appendP(header, fb_esp_pgm_str_358);
-            ut->appendP(header, fb_esp_pgm_str_361);
-            header += req->pageToken;
-            hasParam = true;
-        }
+        Core.uh.addParam(header, firebase_pgm_str_65 /* "pageToken" */, req->pageToken, hasParam);
     }
     else
     {
-        ut->appendP(header, fb_esp_pgm_str_326);
+        Core.uh.addGAPIv1Path(header);
 
-        if (req->projectId.length() == 0)
-            header += Signer.getCfg()->service_account.data.project_id;
-        else
-            header += req->projectId;
+        header += req->projectId.length() == 0 ? Core.config->service_account.data.project_id : req->projectId;
 
-        ut->appendP(header, fb_esp_pgm_str_364);
+        header += firebase_func_pgm_str_27; // "/locations/"
         if (req->locationId.length() > 0)
             header += req->locationId;
 
-        ut->appendP(header, fb_esp_pgm_str_365);
+        header += firebase_func_pgm_str_28; // "/functions"
 
-        if (req->requestType == fb_esp_functions_request_type_list)
+        if (req->requestType == firebase_functions_request_type_list)
         {
             bool hasParam = false;
 
             if (req->pageSize > 0)
-            {
-                if (hasParam)
-                    ut->appendP(header, fb_esp_pgm_str_172);
-                else
-                    ut->appendP(header, fb_esp_pgm_str_173);
-                ut->appendP(header, fb_esp_pgm_str_357);
-                ut->appendP(header, fb_esp_pgm_str_361);
-                header += NUM2S(req->pageSize).get();
-                hasParam = true;
-            }
+                Core.uh.addParam(header, firebase_pgm_str_63 /* "pageSize" */, MB_String(req->pageSize), hasParam);
 
-            if (req->pageToken.length() > 0)
-            {
-                if (hasParam)
-                    ut->appendP(header, fb_esp_pgm_str_172);
-                else
-                    ut->appendP(header, fb_esp_pgm_str_173);
-                ut->appendP(header, fb_esp_pgm_str_358);
-                ut->appendP(header, fb_esp_pgm_str_361);
-                header += req->pageToken;
-                hasParam = true;
-            }
+            Core.uh.addParam(header, firebase_pgm_str_65 /* "pageToken" */, req->pageToken, hasParam);
         }
 
-        if (req->requestType == fb_esp_functions_request_type_patch || req->requestType == fb_esp_functions_request_type_get_iam_policy || req->requestType == fb_esp_functions_request_type_gen_download_url || req->requestType == fb_esp_functions_request_type_delete || req->requestType == fb_esp_functions_request_type_get || req->requestType == fb_esp_functions_request_type_call || req->requestType == fb_esp_functions_request_type_set_iam_policy)
+        if (req->requestType == firebase_functions_request_type_patch ||
+            req->requestType == firebase_functions_request_type_get_iam_policy ||
+            req->requestType == firebase_functions_request_type_gen_download_url ||
+            req->requestType == firebase_functions_request_type_delete ||
+            req->requestType == firebase_functions_request_type_get ||
+            req->requestType == firebase_functions_request_type_call ||
+            req->requestType == firebase_functions_request_type_set_iam_policy)
         {
-            ut->appendP(header, fb_esp_pgm_str_1);
+            header += firebase_pgm_str_1; // "/"
             if (req->functionId.length() > 0)
                 header += req->functionId;
-            if (req->requestType == fb_esp_functions_request_type_call)
-                ut->appendP(header, fb_esp_pgm_str_366);
-            else if (req->requestType == fb_esp_functions_request_type_set_iam_policy)
-                ut->appendP(header, fb_esp_pgm_str_401);
-            else if (req->requestType == fb_esp_functions_request_type_gen_download_url)
-                ut->appendP(header, fb_esp_pgm_str_438);
-            else if (req->requestType == fb_esp_functions_request_type_get_iam_policy)
+            if (req->requestType == firebase_functions_request_type_call)
+                header += firebase_func_pgm_str_29; // ":call"
+            else if (req->requestType == firebase_functions_request_type_set_iam_policy)
+                header += firebase_func_pgm_str_30; // ":setIamPolicy"
+            else if (req->requestType == firebase_functions_request_type_gen_download_url)
+                header += firebase_func_pgm_str_31; // ":generateDownloadUrl"
+            else if (req->requestType == firebase_functions_request_type_get_iam_policy)
             {
-                ut->appendP(header, fb_esp_pgm_str_465);
-                if (req->policyVersion.length() > 0)
-                {
-                    ut->appendP(header, fb_esp_pgm_str_173);
-                    ut->appendP(header, fb_esp_pgm_str_466);
-                    ut->appendP(header, fb_esp_pgm_str_361);
-                    header += req->policyVersion;
-                }
+                header += firebase_func_pgm_str_32; // ":getIamPolicy"
+                bool hasParam = false;
+                Core.uh.addParam(header, firebase_func_pgm_str_33 /* "options.requestedPolicyVersion" */,
+                                    req->policyVersion, hasParam);
             }
-            else if (req->requestType == fb_esp_functions_request_type_patch)
+            else if (req->requestType == firebase_functions_request_type_patch)
             {
                 bool hasParam = false;
 
                 if (req->updateMask->size() > 0)
                 {
                     for (size_t i = 0; i < req->updateMask->size(); i++)
-                    {
-                        if (!hasParam)
-                            ut->appendP(header, fb_esp_pgm_str_173);
-                        else
-                            ut->appendP(header, fb_esp_pgm_str_172);
-                        ut->appendP(header, fb_esp_pgm_str_470);
-                        header += (*req->updateMask)[i];
-                        hasParam = true;
-                    }
+                        Core.uh.addParam(header, firebase_func_pgm_str_34 /* "updateMask=" */, (*req->updateMask)[i], hasParam);
                 }
             }
         }
-        else if (req->requestType == fb_esp_functions_request_type_gen_upload_url)
-            ut->appendP(header, fb_esp_pgm_str_439);
+        else if (req->requestType == firebase_functions_request_type_gen_upload_url)
+            header += firebase_func_pgm_str_35; // :generateUploadUrl"
     }
 
-    ut->appendP(header, fb_esp_pgm_str_30);
+    Core.hh.addRequestHeaderLast(header);
 
     if (post)
     {
         if (req->payload.length() > 0)
-        {
-            ut->appendP(header, fb_esp_pgm_str_8);
-            ut->appendP(header, fb_esp_pgm_str_129);
-            ut->appendP(header, fb_esp_pgm_str_21);
-        }
-
-        ut->appendP(header, fb_esp_pgm_str_12);
-        header += NUM2S(req->payload.length()).get();
-        ut->appendP(header, fb_esp_pgm_str_21);
+            Core.hh.addContentTypeHeader(header, firebase_pgm_str_62 /* "application/json" */);
+        Core.hh.addContentLengthHeader(header, req->payload.length());
     }
 
-    if (req->requestType == fb_esp_functions_request_type_upload || req->requestType == fb_esp_functions_request_type_pgm_upload)
+    if (req->requestType == firebase_functions_request_type_upload ||
+        req->requestType == firebase_functions_request_type_pgm_upload)
     {
-        ut->appendP(header, fb_esp_pgm_str_8);
-        ut->appendP(header, fb_esp_pgm_str_447);
-        ut->appendP(header, fb_esp_pgm_str_21);
-
+        Core.hh.addContentTypeHeader(header, firebase_func_pgm_str_36 /* "application/zip" */);
         size_t len = 0;
-        if (req->requestType == fb_esp_functions_request_type_pgm_upload)
+        if (req->requestType == firebase_functions_request_type_pgm_upload)
             len = req->pgmArcLen;
-        else if (req->requestType == fb_esp_functions_request_type_upload)
-            len = Signer.getCfg()->_int.fb_file.size();
+        else if (req->requestType == firebase_functions_request_type_upload)
+            len = fbdo->session.cfn.fileSize;
 
-        ut->appendP(header, fb_esp_pgm_str_12);
-        header += NUM2S(len).get();
-        ut->appendP(header, fb_esp_pgm_str_21);
-
-        ut->appendP(header, fb_esp_pgm_str_448);
-        ut->appendP(header, fb_esp_pgm_str_21);
-
-        ut->appendP(header, fb_esp_pgm_str_31);
-        header += req->host;
-        ut->appendP(header, fb_esp_pgm_str_21);
+        Core.hh.addContentLengthHeader(header, len);
+        header += firebase_func_pgm_str_37; // "x-goog-content-length-range: 0,104857600"
+        Core.hh.addNewLine(header);
+        Core.hh.addHostHeader(header, req->host.c_str());
     }
     else
     {
-        ut->appendP(header, fb_esp_pgm_str_31);
 
-        if (req->requestType == fb_esp_functions_request_type_upload_bucket_sources)
-            header += req->host;
+        if (req->requestType == firebase_functions_request_type_upload_bucket_sources)
+            Core.hh.addHostHeader(header, req->host.c_str());
         else
-        {
-            ut->appendP(header, fb_esp_pgm_str_363);
-            ut->appendP(header, fb_esp_pgm_str_120);
-        }
-        ut->appendP(header, fb_esp_pgm_str_21);
+            Core.hh.addGAPIsHostHeader(header, firebase_func_pgm_str_38 /* "cloudfunctions." */);
 
-        if (req->requestType != fb_esp_functions_request_type_upload_bucket_sources)
+        if (req->requestType != firebase_functions_request_type_upload_bucket_sources)
         {
-            ut->appendP(header, fb_esp_pgm_str_237);
-            if (Signer.getTokenType() == token_type_oauth2_access_token)
-                ut->appendP(header, fb_esp_pgm_str_271);
-
-            header += Signer.getToken();
-            ut->appendP(header, fb_esp_pgm_str_21);
+            if (!Core.config->signer.test_mode)
+            {
+                Core.hh.addAuthHeaderFirst(header, Core.getTokenType());
+                header += Core.getToken();
+                Core.hh.addNewLine(header);
+            }
         }
     }
 
-    ut->appendP(header, fb_esp_pgm_str_32);
-    ut->appendP(header, fb_esp_pgm_str_34);
-    ut->appendP(header, fb_esp_pgm_str_21);
+    Core.hh.addUAHeader(header);
+    bool keepAlive = false;
+#if defined(USE_CONNECTION_KEEP_ALIVE_MODE)
+    keepAlive = true;
+#endif
+    Core.hh.addConnectionHeader(header, keepAlive);
+    Core.hh.getCustomHeaders(&Core.sh,header, Core.config->signer.customHeaders);
+    Core.hh.addNewLine(header);
 
-    fbdo->_ss.http_code = FIREBASE_ERROR_TCP_ERROR_NOT_CONNECTED;
+    fbdo->session.response.code = FIREBASE_ERROR_TCP_ERROR_NOT_CONNECTED;
 
-    int ret = fbdo->tcpSend(header.c_str());
-    if (ret == 0 && req->payload.length() > 0)
-        ret = fbdo->tcpSend(req->payload.c_str());
+    fbdo->tcpSend(header.c_str());
+    if (fbdo->session.response.code < 0)
+        return false;
+
+    if (fbdo->session.response.code > 0 && req->payload.length() > 0)
+        fbdo->tcpSend(req->payload.c_str());
 
     header.clear();
     req->payload.clear();
 
-    if (ret == 0)
+    if (fbdo->session.response.code > 0)
     {
-        fbdo->_ss.connected = true;
-        if (req->requestType == fb_esp_functions_request_type_upload)
+        if (req->requestType == firebase_functions_request_type_upload)
         {
-            int available = Signer.getCfg()->_int.fb_file.available();
-            int bufLen = 512;
-            uint8_t *buf = new uint8_t[bufLen + 1];
-            size_t read = 0;
+            // Fix in ESP32 core 2.0.x
+            Core.mbfs.open(fbdo->session.cfn.filepath, mbfs_type fbdo->session.cfn.storageType, mb_fs_open_mode_read);
+            fbdo->session.cfn.filepath.clear();
+            int available = Core.mbfs.available(mbfs_type fbdo->session.cfn.storageType);
+            int bufLen = Core.ut.getUploadBufSize(Core.config, firebase_con_mode_functions);
+            uint8_t *buf = reinterpret_cast<uint8_t *>(Core.mbfs.newP(bufLen + 1, false));
+            int read = 0;
+
             while (available)
             {
                 if (available > bufLen)
                     available = bufLen;
-                read = Signer.getCfg()->_int.fb_file.read(buf, available);
-                if (fbdo->tcpClient.stream()->write(buf, read) != read)
+
+                read = Core.mbfs.read(mbfs_type fbdo->session.cfn.storageType, buf, available);
+
+                if ((int)fbdo->tcpWrite(buf, read) != read)
                     break;
-                available = Signer.getCfg()->_int.fb_file.available();
+
+                available = Core.mbfs.available(mbfs_type fbdo->session.cfn.storageType);
             }
-            ut->delP(&buf);
-            Signer.getCfg()->_int.fb_file.close();
+
+            Core.mbfs.delP(&buf);
+
+            Core.mbfs.close(mbfs_type fbdo->session.cfn.storageType);
         }
-        else if (req->requestType == fb_esp_functions_request_type_pgm_upload)
+        else if (req->requestType == firebase_functions_request_type_pgm_upload)
         {
             int len = req->pgmArcLen;
             int available = len;
-            int bufLen = 512;
-            uint8_t *buf = new uint8_t[bufLen + 1];
+
+            int bufLen = Core.ut.getUploadBufSize(Core.config, firebase_con_mode_functions);
+            uint8_t *buf = reinterpret_cast<uint8_t *>(Core.mbfs.newP(bufLen + 1, false));
             size_t pos = 0;
+
             while (available)
             {
                 if (available > bufLen)
                     available = bufLen;
                 memcpy_P(buf, req->pgmArc + pos, available);
-                if (fbdo->tcpClient.stream()->write(buf, available) != (size_t)available)
+                if ((int)fbdo->tcpWrite(buf, available) != available)
                     break;
                 pos += available;
                 len -= available;
                 available = len;
             }
-            ut->delP(&buf);
+
+            Core.mbfs.delP(&buf);
         }
 
         if (handleResponse(fbdo))
         {
             fbdo->closeSession();
-            Signer.getCfg()->_int.fb_processing = false;
+            Core.internal.fb_processing = false;
             return true;
         }
     }
-    else
-        fbdo->_ss.connected = false;
 
-    Signer.getCfg()->_int.fb_processing = false;
+    Core.internal.fb_processing = false;
     return false;
 }
 
 void FB_Functions::rescon(FirebaseData *fbdo, const char *host)
 {
-    if (fbdo->_ss.cert_updated || !fbdo->_ss.connected || millis() - fbdo->_ss.last_conn_ms > fbdo->_ss.conn_timeout || fbdo->_ss.con_mode != fb_esp_con_mode_functions || strcmp(host, fbdo->_ss.host.c_str()) != 0)
+    fbdo->_responseCallback = NULL;
+
+    if (fbdo->session.cert_updated || millis() - fbdo->session.last_conn_ms > fbdo->session.conn_timeout ||
+        fbdo->session.con_mode != firebase_con_mode_functions || strcmp(host, fbdo->session.host.c_str()) != 0)
     {
-        fbdo->_ss.last_conn_ms = millis();
+        fbdo->session.last_conn_ms = millis();
         fbdo->closeSession();
         fbdo->setSecure();
-        fbdo->ethDNSWorkAround(&ut->config->spi_ethernet_module, host, 443);
     }
-    fbdo->_ss.host = host;
-    fbdo->_ss.con_mode = fb_esp_con_mode_functions;
+    fbdo->session.host = host;
+    fbdo->session.con_mode = firebase_con_mode_functions;
 }
 
 bool FB_Functions::connect(FirebaseData *fbdo, const char *host)
@@ -941,17 +732,17 @@ bool FB_Functions::connect(FirebaseData *fbdo, const char *host)
     if (strlen(host) > 0)
     {
         rescon(fbdo, host);
-        fbdo->tcpClient.begin(host, 443);
+        fbdo->tcpClient.begin(host, 443, &fbdo->session.response.code);
     }
     else
     {
-        MBSTRING host;
-        ut->appendP(host, fb_esp_pgm_str_363);
-        ut->appendP(host, fb_esp_pgm_str_120);
+        MB_String host;
+        Core.hh.addGAPIsHost(host, firebase_func_pgm_str_38 /* "cloudfunctions." */);
         rescon(fbdo, host.c_str());
-        fbdo->tcpClient.begin(host.c_str(), 443);
+        fbdo->tcpClient.begin(host.c_str(), 443, &fbdo->session.response.code);
     }
-    fbdo->_ss.max_payload_length = 0;
+    fbdo->tcpClient.setSession(&fbdo->bsslSession);
+    fbdo->session.max_payload_length = 0;
     return true;
 }
 
@@ -960,771 +751,392 @@ bool FB_Functions::handleResponse(FirebaseData *fbdo)
     if (!fbdo->reconnect())
         return false;
 
-    unsigned long dataTime = millis();
-
-    WiFiClient *stream = fbdo->tcpClient.stream();
-
-    char *pChunk = nullptr;
-    char *tmp = nullptr;
-    char *header = nullptr;
-    bool isHeader = false;
-
     struct server_response_data_t response;
+    struct firebase_tcp_response_handler_t tcpHandler;
 
-    int chunkIdx = 0;
-    int pChunkIdx = 0;
-    int hBufPos = 0;
-    int chunkBufSize = stream->available();
-    int hstate = 0;
-    int chunkedDataState = 0;
-    int chunkedDataSize = 0;
-    int chunkedDataLen = 0;
-    int payloadRead = 0;
-    size_t defaultChunkSize = fbdo->_ss.resp_size;
-    struct fb_esp_auth_token_error_t error;
-    error.code = -1;
-    MBSTRING js;
+    Core.hh.initTCPSession(fbdo->session);
+    Core.hh.intTCPHandler(&fbdo->tcpClient, tcpHandler, 2048, fbdo->session.resp_size, nullptr, false);
 
-    fbdo->_ss.http_code = FIREBASE_ERROR_HTTP_CODE_OK;
-    fbdo->_ss.content_length = -1;
-    fbdo->_ss.payload_length = 0;
-    fbdo->_ss.chunked_encoding = false;
-    fbdo->_ss.buffer_ovf = false;
+    MB_String js;
 
-    defaultChunkSize = 2048;
-    bool envVarsBegin = false;
+    if (!fbdo->waitResponse(tcpHandler))
+        return false;
 
-    while (fbdo->tcpClient.connected() && chunkBufSize <= 0)
+    bool complete = false;
+
+    while (tcpHandler.available() > 0 /* data available to read payload */ ||
+           tcpHandler.payloadRead < response.contentLen /* incomplete content read  */)
     {
-        if (!fbdo->reconnect(dataTime))
-            return false;
-        chunkBufSize = stream->available();
-        ut->idle();
+        if (!fbdo->readResponse(&fbdo->session.cfn.payload, tcpHandler, response) && !response.isChunkedEnc)
+            break;
+
+        // Last chunk?
+        if (Core.ut.isChunkComplete(&tcpHandler, &response, complete))
+            break;
     }
 
-    chunkBufSize = stream->available();
+    // To make sure all chunks read and
+    // ready to send next request
+    if (response.isChunkedEnc)
+        fbdo->tcpClient.flush();
 
-    int availablePayload = chunkBufSize;
-
-    dataTime = millis();
-
-    fbdo->_ss.cfn.payload.clear();
-
-    if (chunkBufSize > 1)
+    // parse the payload
+    if (fbdo->session.cfn.payload.length() > 0 &&
+        (fbdo->session.cfn.requestType != firebase_functions_request_type_upload &&
+         fbdo->session.cfn.requestType != firebase_functions_request_type_pgm_upload))
     {
-        while (chunkBufSize > 0 || availablePayload > 0 || payloadRead < response.contentLen)
+        if (fbdo->session.cfn.payload[0] == '{')
         {
-            if (!fbdo->reconnect(dataTime))
-                return false;
+            fbdo->initJson();
+            int errType = 0;
 
-            chunkBufSize = stream->available();
+            Core.jh.setData(fbdo->session.jsonPtr, fbdo->session.cfn.payload, false);
+            if (Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, firebase_storage_ss_pgm_str_16 /* "error/code" */))
+                errType = 1;
+            else if (Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, firebase_func_pgm_str_39 /* "operations/[0]/error/code" */))
+                errType = 2;
 
-            if (chunkBufSize <= 0 && availablePayload <= 0 && payloadRead >= response.contentLen && response.contentLen > 0)
-                break;
-
-            if (chunkBufSize > 0)
+            if (errType > 0)
             {
-                chunkBufSize = defaultChunkSize;
+                tcpHandler.error.code = fbdo->session.dataPtr->intValue;
 
-                if (chunkIdx == 0)
+                bool success = false;
+
+                if (errType == 1)
+                    success = Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, firebase_storage_ss_pgm_str_17 /* "error/message" */);
+                else if (errType == 2)
+                    success = Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, firebase_func_pgm_str_40 /* "operations/[0]/error/message" */);
+
+                if (success)
                 {
-                    //the first chunk can be http response header
-                    header = (char *)ut->newP(chunkBufSize);
-                    hstate = 1;
-                    int readLen = ut->readLine(stream, header, chunkBufSize);
-                    int pos = 0;
+                    fbdo->session.error = fbdo->session.dataPtr->to<const char *>();
 
-                    tmp = ut->getHeader(header, fb_esp_pgm_str_5, fb_esp_pgm_str_6, pos, 0);
-                    ut->idle();
-                    dataTime = millis();
-                    if (tmp)
+                    if (Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, firebase_func_pgm_str_41 /* "error/details" */))
+                        fbdo->session.error = fbdo->session.dataPtr->to<const char *>();
+
+                    if (_deployTasks.size() > 0)
                     {
-                        //http response header with http response code
-                        isHeader = true;
-                        hBufPos = readLen;
-                        response.httpCode = atoi(tmp);
-                        fbdo->_ss.http_code = response.httpCode;
-                        ut->delP(&tmp);
+                        fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                        fbdo->session.cfn.cbInfo.errorMsg = fbdo->session.error.c_str();
+                        sendCallback(fbdo, _deployTasks[_deployIndex].callback, _deployTasks[_deployIndex].statusInfo);
                     }
                 }
-                else
-                {
-                    ut->idle();
-                    dataTime = millis();
-                    //the next chunk data can be the remaining http header
-                    if (isHeader)
-                    {
-                        //read one line of next header field until the empty header has found
-                        tmp = (char *)ut->newP(chunkBufSize);
-                        int readLen = ut->readLine(stream, tmp, chunkBufSize);
-                        bool headerEnded = false;
-
-                        //check is it the end of http header (\n or \r\n)?
-                        if (readLen == 1)
-                            if (tmp[0] == '\r')
-                                headerEnded = true;
-
-                        if (readLen == 2)
-                            if (tmp[0] == '\r' && tmp[1] == '\n')
-                                headerEnded = true;
-
-                        if (headerEnded)
-                        {
-                            if (response.httpCode == 401)
-                                Signer.authenticated = false;
-                            else if (response.httpCode < 300)
-                                Signer.authenticated = true;
-
-                            //parse header string to get the header field
-                            isHeader = false;
-                            ut->parseRespHeader(header, response);
-                            fbdo->_ss.chunked_encoding = response.isChunkedEnc;
-
-                            if (response.httpCode == FIREBASE_ERROR_HTTP_CODE_NO_CONTENT)
-                                error.code = 0;
-
-                            if (hstate == 1)
-                                ut->delP(&header);
-                            hstate = 0;
-
-                            if (response.contentLen == 0)
-                            {
-                                ut->delP(&tmp);
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            //accumulate the remaining header field
-                            memcpy(header + hBufPos, tmp, readLen);
-                            hBufPos += readLen;
-                        }
-                        ut->delP(&tmp);
-                    }
-                    else
-                    {
-                        //the next chuunk data is the payload
-                        if (!response.noContent)
-                        {
-                            pChunkIdx++;
-                            pChunk = (char *)ut->newP(chunkBufSize + 1);
-
-                            if (response.isChunkedEnc)
-                                delay(10);
-                            //read the avilable data
-                            //chunk transfer encoding?
-                            if (response.isChunkedEnc)
-                                availablePayload = ut->readChunkedData(stream, pChunk, chunkedDataState, chunkedDataSize, chunkedDataLen, chunkBufSize);
-                            else
-                                availablePayload = ut->readLine(stream, pChunk, chunkBufSize);
-
-                            if (availablePayload > 0)
-                            {
-                                fbdo->_ss.payload_length += availablePayload;
-                                if (fbdo->_ss.max_payload_length < fbdo->_ss.payload_length)
-                                    fbdo->_ss.max_payload_length = fbdo->_ss.payload_length;
-                                payloadRead += availablePayload;
-                                if (ut->strposP(pChunk, fb_esp_pgm_str_437, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_381, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_382, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_383, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_386, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_372, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_467, 0) == -1 && ut->strposP(pChunk, fb_esp_pgm_str_468, 0) == -1)
-                                {
-                                    if (ut->strposP(pChunk, fb_esp_pgm_str_374, 0) > -1)
-                                        envVarsBegin = true;
-
-                                    fbdo->_ss.cfn.payload += pChunk;
-
-                                    if (envVarsBegin && ut->strposP(pChunk, fb_esp_pgm_str_469, 0) > -1)
-                                        envVarsBegin = false;
-                                }
-                            }
-
-                            ut->delP(&pChunk);
-
-                            if (availablePayload < 0 || (payloadRead >= response.contentLen && !response.isChunkedEnc))
-                            {
-                                while (stream->available() > 0)
-                                    stream->read();
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            //read all the rest data
-                            while (stream->available() > 0)
-                                stream->read();
-                            break;
-                        }
-                    }
-                }
-
-                chunkIdx++;
             }
-        }
-
-        if (hstate == 1)
-            ut->delP(&header);
-
-        fbdo->_ss.cfn.payload.shrink_to_fit();
-
-        //parse the payload
-        if (fbdo->_ss.cfn.payload.length() > 0 && (fbdo->_ss.cfn.requestType != fb_esp_functions_request_type_upload && fbdo->_ss.cfn.requestType != fb_esp_functions_request_type_pgm_upload))
-        {
-            if (fbdo->_ss.cfn.payload[0] == '{')
+            else
             {
-                if (!fbdo->_ss.jsonPtr)
-                    fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                if (!fbdo->_ss.dataPtr)
-                    fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                fbdo->_ss.jsonPtr->setJsonData(fbdo->_ss.cfn.payload.c_str());
-                tmp = ut->strP(fb_esp_pgm_str_257);
-                fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                ut->delP(&tmp);
-
-                if (fbdo->_ss.dataPtr->success)
-                {
-                    error.code = fbdo->_ss.dataPtr->intValue;
-                    tmp = ut->strP(fb_esp_pgm_str_258);
-                    fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                    ut->delP(&tmp);
-                    if (fbdo->_ss.dataPtr->success)
-                    {
-                        fbdo->_ss.error = fbdo->_ss.dataPtr->to<const char *>();
-
-                        tmp = ut->strP(fb_esp_pgm_str_418);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                        {
-                            fbdo->_ss.error += ", ";
-                            fbdo->_ss.error += fbdo->_ss.dataPtr->to<const char *>();
-                        }
-
-                        if (_deployTasks.size() > 0)
-                        {
-                            fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_error;
-                            sendCallback(fbdo, fbdo->_ss.cfn.cbInfo.status, fbdo->_ss.error.c_str(), _deployTasks[_deployIndex].callback, _deployTasks[_deployIndex].statusInfo);
-                        }
-                    }
-                }
-                else
-                {
-                    error.code = 0;
-                }
-
-                fbdo->_ss.jsonPtr->clear();
-                fbdo->_ss.dataPtr->clear();
+                tcpHandler.error.code = 0;
             }
-            fbdo->_ss.content_length = response.payloadLen;
+
+            fbdo->clearJson();
         }
-    }
-    else
-    {
-        while (stream->available() > 0)
-            stream->read();
+        fbdo->session.content_length = response.payloadLen;
     }
 
-    if (fbdo->_ss.cfn.requestType == fb_esp_functions_request_type_upload || fbdo->_ss.cfn.requestType == fb_esp_functions_request_type_pgm_upload)
+    if (fbdo->session.cfn.requestType == firebase_functions_request_type_upload ||
+        fbdo->session.cfn.requestType == firebase_functions_request_type_pgm_upload)
         return response.httpCode == 200;
     else
-        return error.code == 0;
+        return tcpHandler.error.code == 0;
 }
 
-#if defined(ESP32)
-void FB_Functions::runDeployTask(const char *taskName)
-#elif defined(ESP8266)
 void FB_Functions::runDeployTask()
-#endif
 {
 #if defined(ESP32)
 
     static FB_Functions *_this = this;
+    MB_String taskName = "Deploy_";
+    taskName += random(1, 100);
 
     TaskFunction_t taskCode = [](void *param)
     {
         while (_this->_creation_task_enable)
         {
+
+            if (!Core.internal.deploy_loop_task_enable)
+                break;
+
             vTaskDelay(10 / portTICK_PERIOD_MS);
 
             if (_this->_deployTasks.size() == 0)
                 break;
 
-            if (_this->_deployIndex < _this->_deployTasks.size() - 1)
-                _this->_deployIndex++;
-            else
-                _this->_deployIndex = 0;
-
-            struct fb_esp_deploy_task_info_t *taskInfo = &_this->_deployTasks[_this->_deployIndex];
-
-            if (!taskInfo->done)
-            {
-                if (taskInfo->step == fb_esp_functions_creation_step_gen_upload_url)
-                {
-                    taskInfo->done = true;
-                    _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_generate_upload_url, "", taskInfo->callback, taskInfo->statusInfo);
-                    bool ret = _this->mGenerateUploadUrl(taskInfo->fbdo, taskInfo->config->_projectId.c_str(), taskInfo->config->_locationId.c_str());
-
-                    if (ret)
-                    {
-                        if (!taskInfo->fbdo->_ss.jsonPtr)
-                            taskInfo->fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                        if (!taskInfo->fbdo->_ss.arrPtr)
-                            taskInfo->fbdo->_ss.arrPtr = new FirebaseJsonArray();
-
-                        if (!taskInfo->fbdo->_ss.dataPtr)
-                            taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                        taskInfo->fbdo->_ss.jsonPtr->clear();
-                        taskInfo->fbdo->_ss.jsonPtr->setJsonData(taskInfo->fbdo->_ss.cfn.payload.c_str());
-                        char *tmp = _this->ut->strP(fb_esp_pgm_str_440);
-                        taskInfo->fbdo->_ss.jsonPtr->get(*taskInfo->fbdo->_ss.dataPtr, tmp);
-                        _this->ut->delP(&tmp);
-                        taskInfo->fbdo->_ss.jsonPtr->clear();
-                        taskInfo->fbdo->_ss.arrPtr->clear();
-                        MBSTRING().swap(taskInfo->fbdo->_ss.cfn.payload);
-                        if (taskInfo->fbdo->_ss.dataPtr->success)
-                        {
-                            _this->addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_deploy, taskInfo->callback, taskInfo->statusInfo);
-                            _this->_deployTasks[_this->_deployIndex + 1].uploadUrl = taskInfo->fbdo->_ss.dataPtr->to<const char *>();
-                        }
-                    }
-                    else
-                        _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
-                }
-                else if (taskInfo->step == fb_esp_functions_creation_step_upload_source_files)
-                {
-                    taskInfo->done = true;
-
-                    _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_upload_source_file_in_progress, "", taskInfo->callback, taskInfo->statusInfo);
-                    bool ret = _this->uploadSources(taskInfo->fbdo, taskInfo->config);
-
-                    if (ret)
-                    {
-                        if (!taskInfo->fbdo->_ss.jsonPtr)
-                            taskInfo->fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                        if (!taskInfo->fbdo->_ss.dataPtr)
-                            taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                        taskInfo->fbdo->_ss.jsonPtr->clear();
-                        taskInfo->fbdo->_ss.jsonPtr->setJsonData(taskInfo->fbdo->_ss.cfn.payload.c_str());
-
-                        char *tmp = _this->ut->strP(fb_esp_pgm_str_457);
-                        taskInfo->fbdo->_ss.jsonPtr->get(*taskInfo->fbdo->_ss.dataPtr, tmp);
-                        _this->ut->delP(&tmp);
-
-                        if (taskInfo->fbdo->_ss.dataPtr->success)
-                        {
-                            tmp = _this->ut->strP(fb_esp_pgm_str_383);
-                            taskInfo->config->_funcCfg.add(tmp, taskInfo->fbdo->_ss.dataPtr->to<const char *>());
-                            taskInfo->config->addUpdateMasks(tmp);
-                            _this->ut->delP(&tmp);
-                        }
-
-                        taskInfo->fbdo->_ss.jsonPtr->clear();
-
-                        _this->addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_polling_status, taskInfo->callback, taskInfo->statusInfo);
-                    }
-                    else
-                    {
-                        if (taskInfo->fbdo->_ss.http_code == 302 || taskInfo->fbdo->_ss.http_code == 403)
-                            _this->ut->appendP(taskInfo->fbdo->_ss.error, fb_esp_pgm_str_458);
-
-                        _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
-                    }
-                }
-                else if (taskInfo->step == fb_esp_functions_creation_step_upload_zip_file)
-                {
-                    taskInfo->done = true;
-                    bool ret = false;
-                    _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_upload_source_file_in_progress, "", taskInfo->callback, taskInfo->statusInfo);
-
-                    if (taskInfo->config->_sourceType == functions_sources_type_local_archive)
-                        ret = _this->uploadFile(taskInfo->fbdo, taskInfo->uploadUrl.c_str(), taskInfo->config->_uploadArchiveFile.c_str(), taskInfo->config->_uploadArchiveStorageType);
-                    else if (taskInfo->config->_sourceType == functions_sources_type_flash_data)
-                        ret = _this->uploadPGMArchive(taskInfo->fbdo, taskInfo->uploadUrl.c_str(), taskInfo->config->_pgmArc, taskInfo->config->_pgmArcLen);
-                    taskInfo->uploadUrl.clear();
-                    MBSTRING().swap(taskInfo->uploadUrl);
-                    if (ret)
-                    {
-                        if (!taskInfo->fbdo->_ss.dataPtr)
-                            taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                        char *tmp = _this->ut->strP(fb_esp_pgm_str_383);
-                        taskInfo->config->_funcCfg.set(tmp, taskInfo->fbdo->_ss.dataPtr->to<const char *>());
-                        taskInfo->config->addUpdateMasks(tmp);
-                        _this->ut->delP(&tmp);
-                        _this->addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_polling_status, taskInfo->callback, taskInfo->statusInfo);
-                    }
-                    else
-                        _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
-                }
-                else if (taskInfo->step == fb_esp_functions_creation_step_deploy)
-                {
-                    taskInfo->done = true;
-                    bool ret = false;
-                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_deploy_in_progress;
-                    _this->sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, "", taskInfo->callback, taskInfo->statusInfo);
-
-                    ret = _this->deploy(taskInfo->fbdo, taskInfo->functionId.c_str(), taskInfo->config, taskInfo->patch);
-                    taskInfo->fbdo->_ss.cfn.cbInfo.triggerUrl = taskInfo->config->_httpsTriggerUrl;
-                    if (ret)
-                        _this->addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_set_iam_policy, taskInfo->callback, taskInfo->statusInfo);
-                    else
-                        _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
-                }
-                else if (taskInfo->step == fb_esp_functions_creation_step_set_iam_policy)
-                {
-                    taskInfo->done = true;
-                    bool ret = false;
-                    static PolicyBuilder pol;
-                    pol.json.setJsonData(taskInfo->policy.c_str());
-                    ret = _this->mSetIamPolicy(taskInfo->fbdo, taskInfo->projectId.c_str(), taskInfo->locationId.c_str(), taskInfo->functionId.c_str(), &pol);
-                    if (ret)
-                    {
-                        taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_finished;
-                        _this->sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, "", taskInfo->callback, taskInfo->statusInfo);
-                    }
-                    else
-                        _this->sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
-                }
-                else if (taskInfo->step == fb_esp_functions_creation_step_delete)
-                {
-                    taskInfo->done = true;
-                    bool ret = false;
-                    MBSTRING t;
-                    _this->ut->appendP(t, fb_esp_pgm_str_428);
-                    t += taskInfo->projectId;
-                    _this->ut->appendP(t, fb_esp_pgm_str_431);
-                    ret = _this->mListOperations(taskInfo->fbdo, t.c_str(), "1", "");
-                    if (ret)
-                    {
-                        taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_error;
-                        char *tmp = _this->ut->strP(fb_esp_pgm_str_432);
-
-                        if (!taskInfo->fbdo->_ss.dataPtr)
-                            taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                        if (!taskInfo->fbdo->_ss.jsonPtr)
-                            taskInfo->fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                        taskInfo->fbdo->_ss.jsonPtr->clear();
-                        taskInfo->fbdo->_ss.jsonPtr->setJsonData(taskInfo->fbdo->_ss.cfn.payload.c_str());
-                        taskInfo->fbdo->_ss.jsonPtr->get(*taskInfo->fbdo->_ss.dataPtr, tmp);
-                        _this->ut->delP(&tmp);
-                        _this->sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, taskInfo->fbdo->_ss.dataPtr->to<const char *>(), taskInfo->callback, taskInfo->statusInfo);
-                    }
-
-                    ret = _this->mDeleteFunction(taskInfo->fbdo, taskInfo->projectId.c_str(), taskInfo->locationId.c_str(), taskInfo->functionId.c_str());
-                }
-                else if (taskInfo->step == fb_esp_functions_creation_step_polling_status)
-                {
-                    if (millis() - _this->_lasPollMs > 5000 || _this->_lasPollMs == 0)
-                    {
-                        _this->_lasPollMs = millis();
-
-                        if (!taskInfo->_delete && !taskInfo->active)
-                        {
-
-                            bool ret = _this->mGetFunction(taskInfo->fbdo, taskInfo->projectId.c_str(), taskInfo->locationId.c_str(), taskInfo->functionId.c_str());
-
-                            if (ret)
-                            {
-                                if (_this->_function_status == fb_esp_functions_status_UNKNOWN || _this->_function_status == fb_esp_functions_status_OFFLINE)
-                                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_error;
-                                else if (_this->_function_status == fb_esp_functions_status_DEPLOY_IN_PROGRESS)
-                                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_deploy_in_progress;
-                                else if (_this->_function_status == fb_esp_functions_status_DELETE_IN_PROGRESS)
-                                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_delete_in_progress;
-                                else if (_this->_function_status == fb_esp_functions_status_ACTIVE)
-                                {
-                                    if (taskInfo->setPolicy)
-                                        taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_set_iam_policy_in_progress;
-                                    else
-                                        taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_finished;
-                                }
-
-                                if (_this->_function_status != fb_esp_functions_status_UNKNOWN && _this->_function_status != fb_esp_functions_status_OFFLINE)
-                                    _this->sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, taskInfo->fbdo->_ss.error.c_str(), taskInfo->callback, taskInfo->statusInfo);
-                            }
-
-                            if (!ret || _this->_function_status == fb_esp_functions_status_ACTIVE || _this->_function_status == fb_esp_functions_status_UNKNOWN || _this->_function_status == fb_esp_functions_status_OFFLINE)
-                            {
-                                taskInfo->done = true;
-                                taskInfo->_delete = true;
-                                taskInfo->active = _this->_function_status == fb_esp_functions_status_ACTIVE;
-
-                                if (_this->_function_status == fb_esp_functions_status_ACTIVE && taskInfo->setPolicy)
-                                    _this->addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_idle, taskInfo->callback, taskInfo->statusInfo);
-
-                                if (_this->_function_status == fb_esp_functions_status_UNKNOWN || _this->_function_status == fb_esp_functions_status_OFFLINE)
-                                    _this->addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, fb_esp_functions_creation_step_delete, fb_esp_functions_creation_step_idle, taskInfo->callback, taskInfo->statusInfo);
-                            }
-                        }
-                    }
-                    yield();
-                    vTaskDelay(5000 / portTICK_PERIOD_MS);
-                }
-            }
-
-            size_t n = 0;
-            for (size_t i = 0; i < _this->_deployTasks.size(); i++)
-                if (_this->_deployTasks[i].done)
-                    n++;
-
-            if (n == _this->_deployTasks.size())
-            {
-                for (size_t i = 0; i < n; i++)
-                {
-                    struct fb_esp_deploy_task_info_t *taskInfo = &_this->_deployTasks[i];
-                    MBSTRING().swap(taskInfo->uploadUrl);
-                    MBSTRING().swap(taskInfo->projectId);
-                    MBSTRING().swap(taskInfo->locationId);
-                    MBSTRING().swap(taskInfo->functionId);
-                    MBSTRING().swap(taskInfo->policy);
-                    MBSTRING().swap(taskInfo->httpsTriggerUrl);
-                    taskInfo->fbdo->_ss.long_running_task--;
-                    taskInfo->fbdo->clear();
-                    taskInfo->fbdo = nullptr;
-                    taskInfo->callback = NULL;
-                    taskInfo->config = nullptr;
-                }
-                _this->_deployTasks.clear();
-                _this->_creation_task_enable = false;
-            }
+            _this->mDeployTasks();
 
             yield();
         }
 
-        Signer.getCfg()->_int.functions_check_task_handle = NULL;
+        Core.internal.functions_check_task_handle = NULL;
         vTaskDelete(NULL);
     };
 
-    xTaskCreatePinnedToCore(taskCode, taskName, 12000, NULL, 3, &Signer.getCfg()->_int.functions_check_task_handle, 1);
-#elif defined(ESP8266)
+    xTaskCreatePinnedToCore(taskCode, taskName.c_str(), 12000, NULL, 3, &Core.internal.functions_check_task_handle, 1);
+
+#else
+    mDeployTasks();
+#endif
+}
+
+void FB_Functions::mDeployTasks()
+{
+    if (_creation_task_running)
+        return;
 
     if (_creation_task_enable)
     {
+
         delay(10);
 
         if (_deployTasks.size() == 0)
             return;
+
+        _creation_task_running = true;
 
         if (_deployIndex < _deployTasks.size() - 1)
             _deployIndex++;
         else
             _deployIndex = 0;
 
-        struct fb_esp_deploy_task_info_t *taskInfo = &_deployTasks[_deployIndex];
+        struct firebase_deploy_task_info_t *taskInfo = &_deployTasks[_deployIndex];
 
         if (!taskInfo->done)
         {
 
-            if (taskInfo->step == fb_esp_functions_creation_step_gen_upload_url)
+            if (taskInfo->step == firebase_functions_creation_step_gen_upload_url)
             {
                 taskInfo->done = true;
-                sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_generate_upload_url, "", taskInfo->callback, taskInfo->statusInfo);
-                bool ret = mGenerateUploadUrl(taskInfo->fbdo, taskInfo->config->_projectId.c_str(), taskInfo->config->_locationId.c_str());
+                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_generate_upload_url;
+                taskInfo->fbdo->session.cfn.cbInfo.errorMsg.clear();
+                sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
+                bool ret = mGenerateUploadUrl(taskInfo->fbdo,
+                                              toStringPtr(taskInfo->config->_projectId),
+                                              toStringPtr(taskInfo->config->_locationId));
 
                 if (ret)
                 {
-                    if (!taskInfo->fbdo->_ss.dataPtr)
-                        taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
+                    taskInfo->fbdo->initJson();
+                    Core.jh.setData(taskInfo->fbdo->session.jsonPtr, taskInfo->fbdo->session.cfn.payload, false);
+                    Core.jh.parse(taskInfo->fbdo->session.jsonPtr, taskInfo->fbdo->session.dataPtr,
+                                      firebase_func_pgm_str_42 /* "uploadUrl" */);
 
-                    if (!taskInfo->fbdo->_ss.jsonPtr)
-                        taskInfo->fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                    if (!taskInfo->fbdo->_ss.arrPtr)
-                        taskInfo->fbdo->_ss.arrPtr = new FirebaseJsonArray();
-
-                    taskInfo->fbdo->_ss.jsonPtr->clear();
-                    taskInfo->fbdo->_ss.jsonPtr->setJsonData(taskInfo->fbdo->_ss.cfn.payload.c_str());
-                    char *tmp = ut->strP(fb_esp_pgm_str_440);
-                    taskInfo->fbdo->_ss.jsonPtr->get(*taskInfo->fbdo->_ss.dataPtr, tmp);
-                    ut->delP(&tmp);
-                    taskInfo->fbdo->_ss.jsonPtr->clear();
-                    taskInfo->fbdo->_ss.arrPtr->clear();
-                    MBSTRING().swap(taskInfo->fbdo->_ss.cfn.payload);
-                    if (taskInfo->fbdo->_ss.dataPtr->success)
+                    Core.jh.clear(taskInfo->fbdo->session.jsonPtr);
+                    Core.jh.arrayClear(taskInfo->fbdo->session.arrPtr);
+                    taskInfo->fbdo->session.cfn.payload.clear();
+                    if (taskInfo->fbdo->session.dataPtr->success)
                     {
-                        addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_deploy, taskInfo->callback, taskInfo->statusInfo);
-                        _deployTasks[_deployIndex + 1].uploadUrl = taskInfo->fbdo->_ss.dataPtr->to<const char *>();
+                        addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch,
+                                        taskInfo->nextStep, firebase_functions_creation_step_deploy,
+                                        taskInfo->callback, taskInfo->statusInfo);
+                        _deployTasks[_deployIndex + 1].uploadUrl = taskInfo->fbdo->session.dataPtr->to<const char *>();
                     }
                 }
                 else
-                    sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
+                {
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->errorReason().c_str();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
+                }
             }
 
-            if (taskInfo->step == fb_esp_functions_creation_step_upload_source_files)
+            if (taskInfo->step == firebase_functions_creation_step_upload_source_files)
             {
                 taskInfo->done = true;
 
-                sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_upload_source_file_in_progress, "", taskInfo->callback, taskInfo->statusInfo);
+                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_upload_source_file_in_progress;
+                taskInfo->fbdo->session.cfn.cbInfo.errorMsg.clear();
+                sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
                 bool ret = uploadSources(taskInfo->fbdo, taskInfo->config);
 
                 if (ret)
                 {
-                    if (!taskInfo->fbdo->_ss.jsonPtr)
-                        taskInfo->fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                    if (!taskInfo->fbdo->_ss.dataPtr)
-                        taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                    taskInfo->fbdo->_ss.jsonPtr->clear();
-                    taskInfo->fbdo->_ss.jsonPtr->setJsonData(taskInfo->fbdo->_ss.cfn.payload.c_str());
-
-                    char *tmp = ut->strP(fb_esp_pgm_str_457);
-                    taskInfo->fbdo->_ss.jsonPtr->get(*taskInfo->fbdo->_ss.dataPtr, tmp);
-                    ut->delP(&tmp);
-
-                    if (taskInfo->fbdo->_ss.dataPtr->success)
+                    taskInfo->fbdo->initJson();
+                    Core.jh.setData(taskInfo->fbdo->session.jsonPtr, taskInfo->fbdo->session.cfn.payload, false);
+                    if (Core.jh.parse(taskInfo->fbdo->session.jsonPtr, taskInfo->fbdo->session.dataPtr,
+                                          firebase_func_pgm_str_43 /* "status/uploadUrl" */))
                     {
-                        tmp = ut->strP(fb_esp_pgm_str_383);
-                        taskInfo->config->_funcCfg.add(tmp, taskInfo->fbdo->_ss.dataPtr->to<const char *>());
-                        taskInfo->config->addUpdateMasks(tmp);
-                        ut->delP(&tmp);
+
+                        taskInfo->config->_funcCfg.add(pgm2Str(firebase_func_pgm_str_44 /* "sourceUploadUrl" */),
+                                                       taskInfo->fbdo->session.dataPtr->to<const char *>());
+                        taskInfo->config->addUpdateMasks(pgm2Str(firebase_func_pgm_str_44 /* "sourceUploadUrl" */));
                     }
 
-                    taskInfo->fbdo->_ss.jsonPtr->clear();
+                    Core.jh.clear(taskInfo->fbdo->session.jsonPtr);
 
-                    addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_polling_status, taskInfo->callback, taskInfo->statusInfo);
+                    addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep,
+                                    firebase_functions_creation_step_polling_status, taskInfo->callback, taskInfo->statusInfo);
                 }
                 else
                 {
-                    if (taskInfo->fbdo->_ss.http_code == 302 || taskInfo->fbdo->_ss.http_code == 403)
-                        ut->appendP(taskInfo->fbdo->_ss.error, fb_esp_pgm_str_458);
-
-                    sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
+                    if (taskInfo->fbdo->session.response.code == 302 || taskInfo->fbdo->session.response.code == 403)
+                        taskInfo->fbdo->session.error += firebase_functions_err_pgm_str_1;
+                    // "missing autozip function, please deploy it first"
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->errorReason().c_str();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
                 }
             }
 
-            if (taskInfo->step == fb_esp_functions_creation_step_upload_zip_file)
+            if (taskInfo->step == firebase_functions_creation_step_upload_zip_file)
             {
                 taskInfo->done = true;
                 bool ret = false;
-                sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_upload_source_file_in_progress, "", taskInfo->callback, taskInfo->statusInfo);
+                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_upload_source_file_in_progress;
+                taskInfo->fbdo->session.cfn.cbInfo.errorMsg.clear();
+                sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
 
                 if (taskInfo->config->_sourceType == functions_sources_type_local_archive)
-                    ret = uploadFile(taskInfo->fbdo, taskInfo->uploadUrl.c_str(), taskInfo->config->_uploadArchiveFile.c_str(), taskInfo->config->_uploadArchiveStorageType);
+                    ret = uploadFile(taskInfo->fbdo, taskInfo->uploadUrl.c_str(),
+                                     taskInfo->config->_uploadArchiveFile.c_str(),
+                                     taskInfo->config->_uploadArchiveStorageType);
                 else if (taskInfo->config->_sourceType == functions_sources_type_flash_data)
-                    ret = uploadPGMArchive(taskInfo->fbdo, taskInfo->uploadUrl.c_str(), taskInfo->config->_pgmArc, taskInfo->config->_pgmArcLen);
-                taskInfo->uploadUrl.clear();
-                MBSTRING().swap(taskInfo->uploadUrl);
+                    ret = uploadPGMArchive(taskInfo->fbdo, taskInfo->uploadUrl.c_str(),
+                                           taskInfo->config->_pgmArc, taskInfo->config->_pgmArcLen);
+
                 if (ret)
                 {
-                    char *tmp = ut->strP(fb_esp_pgm_str_383);
-                    taskInfo->config->_funcCfg.set(tmp, taskInfo->fbdo->_ss.dataPtr->to<const char *>());
-                    taskInfo->config->addUpdateMasks(tmp);
-                    ut->delP(&tmp);
-                    addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_polling_status, taskInfo->callback, taskInfo->statusInfo);
+
+                    taskInfo->config->_funcCfg.set(pgm2Str(firebase_func_pgm_str_44 /* "sourceUploadUrl" */),
+                                                   taskInfo->uploadUrl.c_str());
+                    taskInfo->config->addUpdateMasks(pgm2Str(firebase_func_pgm_str_44 /* "sourceUploadUrl" */));
+
+                    addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch,
+                                    taskInfo->nextStep, firebase_functions_creation_step_polling_status,
+                                    taskInfo->callback, taskInfo->statusInfo);
                 }
                 else
-                    sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
+                {
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->errorReason().c_str();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
+                }
+                taskInfo->uploadUrl.clear();
             }
 
-            if (taskInfo->step == fb_esp_functions_creation_step_deploy)
+            if (taskInfo->step == firebase_functions_creation_step_deploy)
             {
                 taskInfo->done = true;
                 bool ret = false;
-                taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_deploy_in_progress;
-                sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, "", taskInfo->callback, taskInfo->statusInfo);
+                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_deploy_in_progress;
+                taskInfo->fbdo->session.cfn.cbInfo.errorMsg.clear();
+                sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
 
                 ret = deploy(taskInfo->fbdo, taskInfo->functionId.c_str(), taskInfo->config, taskInfo->patch);
-                taskInfo->fbdo->_ss.cfn.cbInfo.triggerUrl = taskInfo->config->_httpsTriggerUrl;
+                taskInfo->fbdo->session.cfn.cbInfo.triggerUrl = taskInfo->config->_httpsTriggerUrl;
                 if (ret)
-                    addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_set_iam_policy, taskInfo->callback, taskInfo->statusInfo);
+                    addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch,
+                                    taskInfo->nextStep, firebase_functions_creation_step_set_iam_policy,
+                                    taskInfo->callback, taskInfo->statusInfo);
                 else
-                    sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
+                {
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->errorReason().c_str();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
+                }
             }
 
-            if (taskInfo->step == fb_esp_functions_creation_step_set_iam_policy)
+            if (taskInfo->step == firebase_functions_creation_step_set_iam_policy)
             {
                 taskInfo->done = true;
                 bool ret = false;
                 static PolicyBuilder pol;
-                pol.json.setJsonData(taskInfo->policy.c_str());
-                ret = mSetIamPolicy(taskInfo->fbdo, taskInfo->projectId.c_str(), taskInfo->locationId.c_str(), taskInfo->functionId.c_str(), &pol);
+                Core.jh.setData(&pol.json, taskInfo->policy, false);
+                ret = mSetIamPolicy(taskInfo->fbdo, toStringPtr(taskInfo->projectId),
+                                    toStringPtr(taskInfo->locationId), toStringPtr(taskInfo->functionId),
+                                    &pol, toStringPtr(_EMPTY_STR));
                 if (ret)
                 {
-                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_finished;
-                    sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, "", taskInfo->callback, taskInfo->statusInfo);
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_finished;
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg.clear();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
                 }
                 else
-                    sendCallback(taskInfo->fbdo, fb_esp_functions_operation_status_error, taskInfo->fbdo->errorReason().c_str(), taskInfo->callback, taskInfo->statusInfo);
+                {
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->errorReason().c_str();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
+                }
             }
 
-            if (taskInfo->step == fb_esp_functions_creation_step_delete)
+            if (taskInfo->step == firebase_functions_creation_step_delete)
             {
                 taskInfo->done = true;
                 bool ret = false;
-                MBSTRING t;
-                ut->appendP(t, fb_esp_pgm_str_428);
+                MB_String t;
+                t += firebase_func_pgm_str_45; // "project:"
                 t += taskInfo->projectId;
-                ut->appendP(t, fb_esp_pgm_str_431);
-                ret = mListOperations(taskInfo->fbdo, t.c_str(), "1", "");
+                t += firebase_func_pgm_str_46; // ",latest:true"
+                ret = mListOperations(taskInfo->fbdo, toStringPtr(t), toStringPtr("1"), toStringPtr(_EMPTY_STR));
                 if (ret)
                 {
-                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_error;
-                    char *tmp = ut->strP(fb_esp_pgm_str_432);
+                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                    taskInfo->fbdo->initJson();
+                    Core.jh.setData(taskInfo->fbdo->session.jsonPtr,
+                                        taskInfo->fbdo->session.cfn.payload, false);
+                    Core.jh.parse(taskInfo->fbdo->session.jsonPtr,
+                                      taskInfo->fbdo->session.dataPtr, firebase_func_pgm_str_40 /* "operations/[0]/error/message" */);
 
-                    if (!taskInfo->fbdo->_ss.jsonPtr)
-                        taskInfo->fbdo->_ss.jsonPtr = new FirebaseJson();
-
-                    if (!taskInfo->fbdo->_ss.dataPtr)
-                        taskInfo->fbdo->_ss.dataPtr = new FirebaseJsonData();
-
-                    taskInfo->fbdo->_ss.jsonPtr->clear();
-                    taskInfo->fbdo->_ss.jsonPtr->setJsonData(taskInfo->fbdo->_ss.cfn.payload.c_str());
-                    taskInfo->fbdo->_ss.jsonPtr->get(*taskInfo->fbdo->_ss.dataPtr, tmp);
-                    ut->delP(&tmp);
-                    sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, taskInfo->fbdo->_ss.dataPtr->to<const char *>(), taskInfo->callback, taskInfo->statusInfo);
+                    taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->session.dataPtr->to<const char *>();
+                    sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
                 }
 
-                ret = mDeleteFunction(taskInfo->fbdo, taskInfo->projectId.c_str(), taskInfo->locationId.c_str(), taskInfo->functionId.c_str());
+                ret = mDeleteFunction(taskInfo->fbdo, toStringPtr(taskInfo->projectId),
+                                      toStringPtr(taskInfo->locationId), toStringPtr(taskInfo->functionId));
             }
 
-            if (taskInfo->step == fb_esp_functions_creation_step_polling_status)
+            if (taskInfo->step == firebase_functions_creation_step_polling_status)
             {
-                if (millis() - _lasPollMs > 5000 || _lasPollMs == 0)
+                if (millis() - _lastPollMs > 5000 || _lastPollMs == 0)
                 {
-                    _lasPollMs = millis();
+                    _lastPollMs = millis();
 
                     if (!taskInfo->_delete && !taskInfo->active)
                     {
 
-                        bool ret = mGetFunction(taskInfo->fbdo, taskInfo->projectId.c_str(), taskInfo->locationId.c_str(), taskInfo->functionId.c_str());
+                        bool ret = mGetFunction(taskInfo->fbdo,
+                                                toStringPtr(taskInfo->projectId),
+                                                toStringPtr(taskInfo->locationId),
+                                                toStringPtr(taskInfo->functionId));
 
                         if (ret)
                         {
-                            if (_function_status == fb_esp_functions_status_UNKNOWN || _function_status == fb_esp_functions_status_OFFLINE)
-                                taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_error;
-                            else if (_function_status == fb_esp_functions_status_DEPLOY_IN_PROGRESS)
-                                taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_deploy_in_progress;
-                            else if (_function_status == fb_esp_functions_status_DELETE_IN_PROGRESS)
-                                taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_delete_in_progress;
-                            else if (_function_status == fb_esp_functions_status_ACTIVE)
+                            if (_function_status == firebase_functions_status_UNKNOWN ||
+                                _function_status == firebase_functions_status_OFFLINE)
+                                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_error;
+                            else if (_function_status == firebase_functions_status_DEPLOY_IN_PROGRESS)
+                                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_deploy_in_progress;
+                            else if (_function_status == firebase_functions_status_DELETE_IN_PROGRESS)
+                                taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_delete_in_progress;
+                            else if (_function_status == firebase_functions_status_ACTIVE)
                             {
                                 if (taskInfo->setPolicy)
-                                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_set_iam_policy_in_progress;
+                                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_set_iam_policy_in_progress;
                                 else
-                                    taskInfo->fbdo->_ss.cfn.cbInfo.status = fb_esp_functions_operation_status_finished;
+                                    taskInfo->fbdo->session.cfn.cbInfo.status = firebase_functions_operation_status_finished;
                             }
 
-                            if (_function_status != fb_esp_functions_status_UNKNOWN && _function_status != fb_esp_functions_status_OFFLINE)
-                                sendCallback(taskInfo->fbdo, taskInfo->fbdo->_ss.cfn.cbInfo.status, taskInfo->fbdo->_ss.error.c_str(), taskInfo->callback, taskInfo->statusInfo);
+                            if (_function_status != firebase_functions_status_UNKNOWN && _function_status != firebase_functions_status_OFFLINE)
+                            {
+                                taskInfo->fbdo->session.cfn.cbInfo.errorMsg = taskInfo->fbdo->session.error;
+                                sendCallback(taskInfo->fbdo, taskInfo->callback, taskInfo->statusInfo);
+                            }
                         }
 
-                        if (!ret || _function_status == fb_esp_functions_status_ACTIVE || _function_status == fb_esp_functions_status_UNKNOWN || _function_status == fb_esp_functions_status_OFFLINE)
+                        if (!ret || _function_status == firebase_functions_status_ACTIVE ||
+                            _function_status == firebase_functions_status_UNKNOWN ||
+                            _function_status == firebase_functions_status_OFFLINE)
                         {
                             taskInfo->done = true;
                             taskInfo->_delete = true;
-                            taskInfo->active = _function_status == fb_esp_functions_status_ACTIVE;
+                            taskInfo->active = _function_status == firebase_functions_status_ACTIVE;
 
-                            if (_function_status == fb_esp_functions_status_ACTIVE && taskInfo->setPolicy)
-                                addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep, fb_esp_functions_creation_step_idle, taskInfo->callback, taskInfo->statusInfo);
+                            if (_function_status == firebase_functions_status_ACTIVE && taskInfo->setPolicy)
+                                addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, taskInfo->nextStep,
+                                                firebase_functions_creation_step_idle, taskInfo->callback, taskInfo->statusInfo);
 
-                            if (_function_status == fb_esp_functions_status_UNKNOWN || _function_status == fb_esp_functions_status_OFFLINE)
-                                addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch, fb_esp_functions_creation_step_delete, fb_esp_functions_creation_step_idle, taskInfo->callback, taskInfo->statusInfo);
+                            if (_function_status == firebase_functions_status_UNKNOWN ||
+                                _function_status == firebase_functions_status_OFFLINE)
+                                addCreationTask(taskInfo->fbdo, taskInfo->config, taskInfo->patch,
+                                                firebase_functions_creation_step_delete, firebase_functions_creation_step_idle,
+                                                taskInfo->callback, taskInfo->statusInfo);
                         }
                     }
                 }
@@ -1736,21 +1148,24 @@ void FB_Functions::runDeployTask()
             if (_deployTasks[i].done)
                 n++;
 
-        if (_deployTasks.size() > 0 && n < _deployTasks.size())
-            ut->set_scheduled_callback(std::bind(&FB_Functions::runDeployTask, this));
+#if defined(ESP8266)
+        // User intends to run task manually, do not add schedule.
+        if (Core.internal.deploy_loop_task_enable && _deployTasks.size() > 0 && n < _deployTasks.size())
+            Core.set_scheduled_callback(std::bind(&FB_Functions::runDeployTask, this));
+#endif
 
         if (n == _deployTasks.size())
         {
             for (size_t i = 0; i < n; i++)
             {
-                struct fb_esp_deploy_task_info_t *taskInfo = &_deployTasks[i];
-                MBSTRING().swap(taskInfo->uploadUrl);
-                MBSTRING().swap(taskInfo->projectId);
-                MBSTRING().swap(taskInfo->locationId);
-                MBSTRING().swap(taskInfo->functionId);
-                MBSTRING().swap(taskInfo->policy);
-                MBSTRING().swap(taskInfo->httpsTriggerUrl);
-                taskInfo->fbdo->_ss.long_running_task--;
+                struct firebase_deploy_task_info_t *taskInfo = &_deployTasks[i];
+                taskInfo->uploadUrl.clear();
+                taskInfo->projectId.clear();
+                taskInfo->locationId.clear();
+                taskInfo->functionId.clear();
+                taskInfo->policy.clear();
+                taskInfo->httpsTriggerUrl.clear();
+                taskInfo->fbdo->session.long_running_task--;
                 taskInfo->fbdo->clear();
                 taskInfo->fbdo = nullptr;
                 taskInfo->callback = NULL;
@@ -1762,9 +1177,22 @@ void FB_Functions::runDeployTask()
         }
     }
 
+    _creation_task_running = false;
+}
+
+void FB_Functions::mRunDeployTasks()
+{
+    Core.internal.deploy_loop_task_enable = false;
+
+#if defined(ESP32)
+    if (Core.internal.functions_check_task_handle)
+        return;
 #endif
+
+    if (_deployTasks.size() > 0)
+        mDeployTasks();
 }
 
 #endif
 
-#endif //ENABLE
+#endif // ENABLE

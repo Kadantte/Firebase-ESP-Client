@@ -1,25 +1,25 @@
 /**
  * Created by K. Suwatchai (Mobizt)
- * 
- * Email: k_suwatchai@hotmail.com
- * 
- * Github: https://github.com/mobizt
- * 
- * Copyright (c) 2021 mobizt
  *
-*/
+ * Email: k_suwatchai@hotmail.com
+ *
+ * Github: https://github.com/mobizt
+ *
+ * Copyright (c) 2023 mobizt
+ *
+ */
 
 #include <Arduino.h>
-#if defined(ESP32)
+#if defined(ESP32) || defined(ARDUINO_RASPBERRY_PI_PICO_W)
 #include <WiFi.h>
 #elif defined(ESP8266)
 #include <ESP8266WiFi.h>
 #endif
 
+// This example is for ESP8266 and ESP32
+
 #include <WiFiClient.h>
 
-//Enable WiFiClientSecure library after include the library and before include the FirebaseJson.
-#define FBJS_ENABLE_WIFI_CLIENT
 #include <FirebaseJson.h>
 
 /* Define the WiFi credentials */
@@ -81,7 +81,7 @@ void loop()
 
             Serial.print("Read response...");
 
-            //Automatically parsing for response (w or w/o header) with chunk encoding supported.
+            // Automatically parsing for response (w or w/o header) with chunk encoding supported.
             if (json.readFrom(client))
             {
                 Serial.println();
@@ -89,7 +89,7 @@ void loop()
                 Serial.println("\n\nComplete");
             }
             else
-                Serial.printf(" failed with http code: %d\n", json.responseCode());
+                Serial_Printf(" failed with http code: %d\n", json.responseCode());
         }
         else
             Serial.println(" failed\n");

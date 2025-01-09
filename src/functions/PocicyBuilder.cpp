@@ -1,41 +1,38 @@
+
 /**
- * Google's IAM Policy Builder class, PolicyBuilder.cpp version 1.0.4
- * 
- * This library supports Espressif ESP8266 and ESP32
- * 
- * Created October 25, 2021
- * 
- * This work is a part of Firebase ESP Client library
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
+ * Google's IAM Policy Builder class, PolicyBuilder.cpp version 1.0.9
+ *
+ * Created April 5, 2023
+ *
  * The MIT License (MIT)
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
- * 
+ * Copyright (c) 2023 K. Suwatchai (Mobizt)
+ *
+ *
  * Permission is hereby granted, free of charge, to any person returning a copy of
  * this software and associated documentation files (the "Software"), to deal in
  * the Software without restriction, including without limitation the rights to
  * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
  * the Software, and to permit persons to whom the Software is furnished to do so,
  * subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+ */
 
-#include "FirebaseFS.h"
+#include "./FirebaseFS.h"
 
-#ifdef ENABLE_FB_FUNCTIONS
+#if defined(ENABLE_FB_FUNCTIONS) || defined(FIREBASE_ENABLE_FB_FUNCTIONS)
 
 #ifndef _FB_IAM_POLICY_BUILDER_CPP_
 #define _FB_IAM_POLICY_BUILDER_CPP_
+
 #include "PolicyBuilder.h"
 
 AuditLogConfig::AuditLogConfig()
@@ -46,53 +43,27 @@ AuditLogConfig::~AuditLogConfig()
 {
 }
 
-void AuditLogConfig::mSetLogType(const char *logType)
+void AuditLogConfig::mSetLogType(MB_StringPtr logType)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_414);
-        json.set(tmp, logType);
-        ut->delP(&tmp);
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_71 /* "logType" */), stringPtr2Str(logType));
 }
 
-void AuditLogConfig::mAddexemptedMembers(const char *member)
+void AuditLogConfig::mAddExemptedMembers(MB_StringPtr member)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_415);
-        arr.add(member);
-        json.set(tmp, arr);
-        ut->delP(&tmp);
-    }
+        arr.add(stringPtr2Str(member));
+        json.set(pgm2Str(firebase_func_pgm_str_72 /* "exemptedMembers" */), arr);
 }
 
 void AuditLogConfig::clearExemptedMembers()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
-        char *tmp = ut->strP(fb_esp_pgm_str_415);
-        json.remove(tmp);
-        ut->delP(&tmp);
-    }
+        json.remove(pgm2Str(firebase_func_pgm_str_72 /* "exemptedMembers" */));
 }
 
 void AuditLogConfig::clear()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
         json.clear();
-    }
 }
 
 AuditConfig::AuditConfig()
@@ -105,53 +76,27 @@ AuditConfig::~AuditConfig()
 
 void AuditConfig::addAuditLogConfig(AuditLogConfig *config, bool clear)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_411);
         arr.add(config->json);
-        json.set(tmp, arr);
-        ut->delP(&tmp);
-        if(clear)
-            config->clear();
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_69 /* "auditConfigs" */), arr);
+        if (clear)
+                config->clear();
 }
 
 void AuditConfig::clearAuditLogConfigs()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
-        char *tmp = ut->strP(fb_esp_pgm_str_411);
-        json.remove(tmp);
-        ut->delP(&tmp);
-    }
+        json.remove(pgm2Str(firebase_func_pgm_str_69 /* "auditConfigs" */));
 }
 
 void AuditConfig::clear()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
         json.clear();
-    }
 }
 
-void AuditConfig::mSetService(const char *service)
+void AuditConfig::mSetService(MB_StringPtr service)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_416);
-        json.set(tmp, service);
-        ut->delP(&tmp);
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_73 /* "service" */), stringPtr2Str(service));
 }
 
 Binding::Binding()
@@ -161,89 +106,61 @@ Binding::~Binding()
 {
 }
 
-void Binding::mAddMember(const char *member)
+void Binding::mAddMember(MB_StringPtr member)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_403);
-        arr.add(member);
-        json.set(tmp, arr);
-        ut->delP(&tmp);
-    }
+        arr.add(stringPtr2Str(member));
+        json.set(pgm2Str(firebase_func_pgm_str_75 /* "members" */), arr);
 }
 
-void Binding::mSetRole(const char *role)
+void Binding::mSetRole(MB_StringPtr role)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_402);
-        json.set(tmp, role);
-        ut->delP(&tmp);
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_74 /* "role" */), stringPtr2Str(role));
 }
-void Binding::mSetCondition(const char *expression, const char *title, const char *description, const char *location)
+void Binding::mSetCondition(MB_StringPtr expression, MB_StringPtr title, MB_StringPtr description, MB_StringPtr location)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        MBSTRING b, t;
-        ut->appendP(b, fb_esp_pgm_str_405);
-        ut->appendP(b, fb_esp_pgm_str_1);
 
-        if (strlen(expression) > 0)
+        MB_String b, t;
+        b += firebase_func_pgm_str_77; // "condition"
+        b += firebase_pgm_str_1;       // "/"
+
+        MB_String _expression = expression, _title = title, _description = description, _location = location;
+
+        if (_expression.length() > 0)
         {
-            t = b;
-            ut->appendP(t, fb_esp_pgm_str_406);
-            json.set(t.c_str(), expression);
+                t = b;
+                t += firebase_func_pgm_str_78; // "expression"
+                json.set(t.c_str(), _expression);
         }
-        if (strlen(title) > 0)
+        if (_title.length() > 0)
         {
-            t = b;
-            ut->appendP(t, fb_esp_pgm_str_407);
-            json.set(t.c_str(), title);
+                t = b;
+                t += firebase_func_pgm_str_79; // "title"
+                json.set(t.c_str(), _title);
         }
-        if (strlen(description) > 0)
+        if (_description.length() > 0)
         {
-            t = b;
-            ut->appendP(t, fb_esp_pgm_str_408);
-            json.set(t.c_str(), description);
+                t = b;
+                t += firebase_func_pgm_str_80; // "description"
+                json.set(t.c_str(), _description);
         }
-        if (strlen(location) > 0)
+        if (_location.length() > 0)
         {
-            t = b;
-            ut->appendP(t, fb_esp_pgm_str_409);
-            json.set(t.c_str(), location);
+                t = b;
+                t += firebase_func_pgm_str_3; // "location"
+                json.set(t.c_str(), _location);
         }
-    }
 }
 
 void Binding::clearMembers()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
-        char *tmp = ut->strP(fb_esp_pgm_str_403);
-        json.remove(tmp);
-        ut->delP(&tmp);
-    }
+        json.remove(pgm2Str(firebase_func_pgm_str_75 /* "members" */));
 }
 
 void Binding::clear()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
         json.clear();
-    }
 }
 
 PolicyBuilder::PolicyBuilder()
@@ -256,103 +173,57 @@ PolicyBuilder::~PolicyBuilder()
 
 void PolicyBuilder::addAuditConfig(AuditConfig *config, bool clear)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr2.add(config->json);
-        char *tmp = ut->strP(fb_esp_pgm_str_411);
-        json.set(tmp, arr2);
-        ut->delP(&tmp);
-        if(clear)
-            config->clear();
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_69 /* "auditConfigs" */), arr2);
+        if (clear)
+                config->clear();
 };
 
 void PolicyBuilder::clearAuditConfigs()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr2.clear();
-        char *tmp = ut->strP(fb_esp_pgm_str_411);
-        json.remove(tmp);
-        ut->delP(&tmp);
-    }
+        json.remove(pgm2Str(firebase_func_pgm_str_69 /* "auditConfigs" */));
 };
 
 void PolicyBuilder::addBinding(Binding *binding, bool clear)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.add(binding->json);
-        char *tmp = ut->strP(fb_esp_pgm_str_404);
-        json.set(tmp, arr);
-        ut->delP(&tmp);
-        if(clear)
-            binding->clear();
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_76 /* "bindings" */), arr);
+        if (clear)
+                binding->clear();
 }
 
-void PolicyBuilder::mSetVersion(const char* v)
+void PolicyBuilder::mSetVersion(MB_StringPtr v)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_410);
-        json.set(tmp, atoi(v));
-        ut->delP(&tmp);
-    }
+        MB_String _v = v;
+        json.set(pgm2Str(firebase_func_pgm_str_81 /* "version" */), atoi(_v.c_str()));
 }
-void PolicyBuilder::mSetETag(const char *etag)
+void PolicyBuilder::mSetETag(MB_StringPtr etag)
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
-        char *tmp = ut->strP(fb_esp_pgm_str_412);
-        json.set(tmp, etag);
-        ut->delP(&tmp);
-    }
+        json.set(pgm2Str(firebase_func_pgm_str_70 /* "etag" */), stringPtr2Str(etag));
 }
 void PolicyBuilder::clearBindings()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr.clear();
-        char *tmp = ut->strP(fb_esp_pgm_str_404);
-        json.remove(tmp);
-        ut->delP(&tmp);
-    }
+        json.remove(pgm2Str(firebase_func_pgm_str_76 /* "bindings" */));
 }
 void PolicyBuilder::clear()
 {
-    if (!ut)
-        ut = Signer.ut;
-    if (ut)
-    {
         arr2.clear();
         arr.clear();
         json.clear();
-    }
 }
 
 void PolicyBuilder::toString(String &s, bool prettify)
 {
-    json.toString(s, prettify);
+        json.toString(s, prettify);
 }
 
-const char* PolicyBuilder::raw()
+const char *PolicyBuilder::raw()
 {
-    return json.raw();
+        return json.raw();
 }
 
 #endif
 
-#endif //ENABLE
+#endif // ENABLE

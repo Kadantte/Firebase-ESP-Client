@@ -1,38 +1,38 @@
+
 /**
- * Google's Firebase Storage class, FCS.cpp version 1.1.7
- * 
- * This library supports Espressif ESP8266 and ESP32
- * 
- * Created December 10, 2021
- * 
- * This work is a part of Firebase ESP Client library
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
+ * Google's Firebase Storage class, FCS.cpp version 1.2.13
+ *
+ * This library supports Espressif ESP8266, ESP32 and RP2040 Pico
+ *
+ * Created September 13, 2023
+ *
  * The MIT License (MIT)
- * Copyright (c) 2021 K. Suwatchai (Mobizt)
- * 
- * 
+ * Copyright (c) 2023 K. Suwatchai (Mobizt)
+ *
+ *
  * Permission is hereby granted, free of charge, to any person returning a copy of
  * this software and associated documentation files (the "Software"), to deal in
  * the Software without restriction, including without limitation the rights to
  * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
  * the Software, and to permit persons to whom the Software is furnished to do so,
  * subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
  * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
  * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
  * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-*/
+ */
 
-#include "FirebaseFS.h"
+#include <Arduino.h>
+#include "./mbfs/MB_MCU.h"
+#include "./FirebaseFS.h"
 
-#ifdef ENABLE_FB_STORAGE
+#if defined(ENABLE_FB_STORAGE) || defined(FIREBASE_ENABLE_FB_STORAGE)
 
 #ifndef FB_Storage_CPP
 #define FB_Storage_CPP
@@ -46,771 +46,678 @@ FB_Storage ::~FB_Storage()
 {
 }
 
-void FB_Storage::begin(UtilsClass *u)
+bool FB_Storage::sendRequest(FirebaseData *fbdo, struct firebase_fcs_req_t *req)
 {
-    ut = u;
-}
+    fbdo->session.http_code = 0;
 
-bool FB_Storage::sendRequest(FirebaseData *fbdo, struct fb_esp_fcs_req_t *req)
-{
-    if (!Signer.getCfg())
+    if (!Core.config)
     {
-        fbdo->_ss.http_code = FIREBASE_ERROR_UNINITIALIZED;
+        fbdo->session.response.code = FIREBASE_ERROR_UNINITIALIZED;
         return false;
     }
-#ifdef ENABLE_RTDB
-    if (fbdo->_ss.rtdb.pause)
+
+#if defined(ENABLE_RTDB) || defined(FIREBASE_ENABLE_RTDB)
+    if (fbdo->session.rtdb.pause)
         return true;
 #endif
+
     if (!fbdo->reconnect())
         return false;
 
-    if (!Signer.tokenReady())
+    if (!Core.tokenReady())
         return false;
 
-    if (fbdo->_ss.long_running_task > 0)
+    if (fbdo->session.long_running_task > 0)
     {
-        fbdo->_ss.http_code = FIREBASE_ERROR_LONG_RUNNING_TASK;
+        fbdo->session.response.code = FIREBASE_ERROR_LONG_RUNNING_TASK;
         return false;
     }
 
-    if (Signer.getCfg()->_int.fb_processing)
+    if (Core.internal.fb_processing)
         return false;
 
-    Signer.getCfg()->_int.fb_processing = true;
-
     fcs_connect(fbdo);
-    fbdo->_ss.fcs.meta.name.clear();
-    fbdo->_ss.fcs.meta.bucket.clear();
-    fbdo->_ss.fcs.meta.contentType.clear();
-    fbdo->_ss.fcs.meta.crc32.clear();
-    fbdo->_ss.fcs.meta.etag.clear();
-    fbdo->_ss.fcs.meta.downloadTokens.clear();
-    fbdo->_ss.fcs.meta.generation = 0;
-    fbdo->_ss.fcs.meta.size = 0;
+    fbdo->session.fcs.meta.name.clear();
+    fbdo->session.fcs.meta.bucket.clear();
+    fbdo->session.fcs.meta.contentType.clear();
+    fbdo->session.fcs.meta.crc32.clear();
+    fbdo->session.fcs.meta.etag.clear();
+    fbdo->session.fcs.meta.downloadTokens.clear();
+    fbdo->session.fcs.meta.generation = 0;
+    fbdo->session.fcs.meta.size = 0;
 
-    if (req->requestType == fb_esp_fcs_request_type_download || req->requestType == fb_esp_fcs_request_type_upload)
+    if (req->requestType == firebase_fcs_request_type_download ||
+        req->requestType == firebase_fcs_request_type_download_ota ||
+        req->requestType == firebase_fcs_request_type_upload)
     {
         if (req->remoteFileName.length() == 0)
         {
-            fbdo->_ss.http_code = FIREBASE_ERROR_HTTP_CODE_NOT_FOUND;
+            fbdo->session.response.code = FIREBASE_ERROR_HTTP_CODE_NOT_FOUND;
             return false;
         }
 
         if (req->remoteFileName[0] == '/' && req->remoteFileName.length() == 1)
         {
-            fbdo->_ss.http_code = FIREBASE_ERROR_HTTP_CODE_NOT_FOUND;
+            fbdo->session.response.code = FIREBASE_ERROR_HTTP_CODE_NOT_FOUND;
             return false;
         }
     }
 
-    return fcs_sendRequest(fbdo, req);
+    Core.internal.fb_processing = true;
+
+    bool ret = fcs_sendRequest(fbdo, req);
+
+    Core.internal.fb_processing = false;
+
+    if (!ret)
+    {
+        if (req->requestType == firebase_fcs_request_type_download ||
+            req->requestType == firebase_fcs_request_type_download_ota)
+        {
+            fbdo->session.fcs.cbDownloadInfo.status = firebase_fcs_download_status_error;
+            FCS_DownloadStatusInfo in;
+            makeDownloadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_download_status_error,
+                               0, 0, 0, fbdo->errorReason());
+            sendDownloadCallback(fbdo, in, req->downloadCallback, req->downloadStatusInfo);
+        }
+        else if (req->requestType == firebase_fcs_request_type_upload ||
+                 req->requestType == firebase_fcs_request_type_upload_pgm_data)
+        {
+            fbdo->session.fcs.cbUploadInfo.status = firebase_fcs_upload_status_error;
+            FCS_UploadStatusInfo in;
+            makeUploadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_upload_status_error,
+                             0, 0, 0, fbdo->errorReason());
+            sendUploadCallback(fbdo, in, req->uploadCallback, req->uploadStatusInfo);
+        }
+        fbdo->closeSession();
+    }
+
+    return ret;
 }
 
-bool FB_Storage::mUpload(FirebaseData *fbdo, const char *bucketID, const char *localFileName, fb_esp_mem_storage_type storageType, const char *remoteFileName, const char *mime)
+bool FB_Storage::mUpload(FirebaseData *fbdo, MB_StringPtr bucketID, MB_StringPtr localFileName,
+                         firebase_mem_storage_type storageType, MB_StringPtr remoteFileName,
+                         MB_StringPtr mime, FCS_UploadProgressCallback callback)
 {
-    struct fb_esp_fcs_req_t req;
+    struct firebase_fcs_req_t req;
     req.localFileName = localFileName;
+    Core.ut.makePath(req.localFileName);
     req.remoteFileName = remoteFileName;
     req.storageType = storageType;
-    req.requestType = fb_esp_fcs_request_type_upload;
+    req.requestType = firebase_fcs_request_type_upload;
     req.bucketID = bucketID;
     req.mime = mime;
+    req.uploadCallback = callback;
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Storage::mUpload(FirebaseData *fbdo, const char *bucketID, const uint8_t *data, size_t len, const char *remoteFileName, const char *mime)
+bool FB_Storage::mUpload(FirebaseData *fbdo, MB_StringPtr bucketID, const uint8_t *data, size_t len,
+                         MB_StringPtr remoteFileName, MB_StringPtr mime,
+                         FCS_UploadProgressCallback callback)
 {
-    struct fb_esp_fcs_req_t req;
+    struct firebase_fcs_req_t req;
     req.remoteFileName = remoteFileName;
-    req.requestType = fb_esp_fcs_request_type_upload_pgm_data;
+    req.requestType = firebase_fcs_request_type_upload_pgm_data;
     req.bucketID = bucketID;
     req.mime = mime;
     req.pgmArc = data;
     req.pgmArcLen = len;
+    req.uploadCallback = callback;
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Storage::mDownload(FirebaseData *fbdo, const char *bucketID, const char *remoteFileName, const char *localFileName, fb_esp_mem_storage_type storageType)
+bool FB_Storage::mDownload(FirebaseData *fbdo, MB_StringPtr bucketID, MB_StringPtr remoteFileName,
+                           MB_StringPtr localFileName, firebase_mem_storage_type storageType,
+                           FCS_DownloadProgressCallback callback)
 {
-    struct fb_esp_fcs_req_t req;
+    struct firebase_fcs_req_t req;
     req.localFileName = localFileName;
+    Core.ut.makePath(req.localFileName);
     req.remoteFileName = remoteFileName;
     req.storageType = storageType;
-    req.requestType = fb_esp_fcs_request_type_download;
+    req.requestType = firebase_fcs_request_type_download;
     req.bucketID = bucketID;
+    req.downloadCallback = callback;
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Storage::mGetMetadata(FirebaseData *fbdo, const char *bucketID, const char *remoteFileName)
+bool FB_Storage::mDownloadOTA(FirebaseData *fbdo, MB_StringPtr bucketID, MB_StringPtr remoteFileName,
+                              FCS_DownloadProgressCallback callback)
 {
-    struct fb_esp_fcs_req_t req;
+#if defined(OTA_UPDATE_ENABLED) && (defined(ESP32) || defined(ESP8266) || defined(MB_ARDUINO_PICO))
+    struct firebase_fcs_req_t req;
+    req.remoteFileName = remoteFileName;
+    req.requestType = firebase_fcs_request_type_download_ota;
+    req.bucketID = bucketID;
+    req.downloadCallback = callback;
+
+    fbdo->closeSession();
+
+    int rx_size = fbdo->session.bssl_rx_size;
+    fbdo->session.bssl_rx_size = 16384;
+
+    bool ret = sendRequest(fbdo, &req);
+
+    fbdo->session.bssl_rx_size = rx_size;
+
+    fbdo->closeSession();
+    return ret;
+
+#endif
+    return false;
+}
+
+bool FB_Storage::mGetMetadata(FirebaseData *fbdo, MB_StringPtr bucketID, MB_StringPtr remoteFileName)
+{
+    struct firebase_fcs_req_t req;
     req.remoteFileName = remoteFileName;
     req.bucketID = bucketID;
-    req.requestType = fb_esp_fcs_request_type_get_meta;
+    req.requestType = firebase_fcs_request_type_get_meta;
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Storage::mDeleteFile(FirebaseData *fbdo, const char *bucketID, const char *remoteFileName)
+bool FB_Storage::mDeleteFile(FirebaseData *fbdo, MB_StringPtr bucketID, MB_StringPtr remoteFileName)
 {
-    struct fb_esp_fcs_req_t req;
-    req.requestType = fb_esp_fcs_request_type_delete;
+    struct firebase_fcs_req_t req;
+    req.requestType = firebase_fcs_request_type_delete;
     req.remoteFileName = remoteFileName;
     req.bucketID = bucketID;
-
     return sendRequest(fbdo, &req);
 }
 
-bool FB_Storage::mListFiles(FirebaseData *fbdo, const char *bucketID)
+bool FB_Storage::mListFiles(FirebaseData *fbdo, MB_StringPtr bucketID)
 {
-    struct fb_esp_fcs_req_t req;
+    struct firebase_fcs_req_t req;
     req.bucketID = bucketID;
-    req.requestType = fb_esp_fcs_request_type_list;
-
+    req.requestType = firebase_fcs_request_type_list;
     return sendRequest(fbdo, &req);
 }
 
 void FB_Storage::rescon(FirebaseData *fbdo, const char *host)
 {
-    if (fbdo->_ss.cert_updated || !fbdo->_ss.connected || millis() - fbdo->_ss.last_conn_ms > fbdo->_ss.conn_timeout || fbdo->_ss.con_mode != fb_esp_con_mode_storage || strcmp(host, fbdo->_ss.host.c_str()) != 0)
+    fbdo->_responseCallback = NULL;
+
+    if (fbdo->session.cert_updated || millis() - fbdo->session.last_conn_ms > fbdo->session.conn_timeout ||
+        fbdo->session.con_mode != firebase_con_mode_storage || strcmp(host, fbdo->session.host.c_str()) != 0)
     {
-        fbdo->_ss.last_conn_ms = millis();
+        fbdo->session.last_conn_ms = millis();
         fbdo->closeSession();
         fbdo->setSecure();
-        fbdo->ethDNSWorkAround(&ut->config->spi_ethernet_module, host, 443);
     }
+    fbdo->session.host = host;
+    fbdo->session.con_mode = firebase_con_mode_storage;
+}
 
-    fbdo->_ss.host = host;
-    fbdo->_ss.con_mode = fb_esp_con_mode_storage;
+void FB_Storage::sendUploadCallback(FirebaseData *fbdo, FCS_UploadStatusInfo &in,
+                                    FCS_UploadProgressCallback cb, FCS_UploadStatusInfo *out)
+{
+    fbdo->session.fcs.cbUploadInfo = in;
+    if (cb)
+        cb(fbdo->session.fcs.cbUploadInfo);
+    if (out)
+        out = &fbdo->session.fcs.cbUploadInfo;
+}
+
+void FB_Storage::sendDownloadCallback(FirebaseData *fbdo, FCS_DownloadStatusInfo &in,
+                                      FCS_DownloadProgressCallback cb, FCS_DownloadStatusInfo *out)
+{
+    fbdo->session.fcs.cbDownloadInfo = in;
+    if (cb)
+        cb(fbdo->session.fcs.cbDownloadInfo);
+    if (out)
+        out = &fbdo->session.fcs.cbDownloadInfo;
+}
+
+void FB_Storage::makeUploadStatus(FCS_UploadStatusInfo &info, const MB_String &local,
+                                  const MB_String &remote, firebase_fcs_upload_status status, size_t progress,
+                                  size_t fileSize, int elapsedTime, const MB_String &msg)
+{
+    info.localFileName = local;
+    info.remoteFileName = remote;
+    info.status = status;
+    info.fileSize = fileSize;
+    info.progress = progress;
+    info.elapsedTime = elapsedTime;
+    info.errorMsg = msg;
+}
+
+void FB_Storage::makeDownloadStatus(FCS_DownloadStatusInfo &info, const MB_String &local,
+                                    const MB_String &remote, firebase_fcs_download_status status, size_t progress,
+                                    size_t fileSize, int elapsedTime, const MB_String &msg)
+{
+    info.localFileName = local;
+    info.remoteFileName = remote;
+    info.status = status;
+    info.fileSize = fileSize;
+    info.progress = progress;
+    info.elapsedTime = elapsedTime;
+    info.errorMsg = msg;
 }
 
 bool FB_Storage::fcs_connect(FirebaseData *fbdo)
 {
-    MBSTRING host;
-    ut->appendP(host, fb_esp_pgm_str_265);
-    ut->appendP(host, fb_esp_pgm_str_120);
+    MB_String host;
+    Core.hh.addGAPIsHost(host, firebase_storage_ss_pgm_str_1 /* "firebasestorage." */);
     rescon(fbdo, host.c_str());
-    fbdo->tcpClient.begin(host.c_str(), 443);
-    fbdo->_ss.max_payload_length = 0;
+    fbdo->tcpClient.setSession(&fbdo->bsslSession);
+    fbdo->tcpClient.begin(host.c_str(), 443, &fbdo->session.response.code);
+    fbdo->session.max_payload_length = 0;
     return true;
 }
 
-bool FB_Storage::fcs_sendRequest(FirebaseData *fbdo, struct fb_esp_fcs_req_t *req)
+void FB_Storage::reportUploadProgress(FirebaseData *fbdo, struct firebase_fcs_req_t *req, size_t readBytes)
+{
+    if (req->fileSize == 0)
+        return;
+
+    int p = (float)readBytes / req->fileSize * 100;
+
+    if (readBytes == 0)
+        fbdo->tcpClient.dataStart = millis();
+
+    if (req->progress != p && (p == 0 || p == 100 || req->progress + ESP_REPORT_PROGRESS_INTERVAL <= p))
+    {
+        req->progress = p;
+        fbdo->tcpClient.dataTime = millis() - fbdo->tcpClient.dataStart;
+        fbdo->session.fcs.cbUploadInfo.status = firebase_fcs_upload_status_upload;
+        FCS_UploadStatusInfo in;
+        makeUploadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_upload_status_upload,
+                         p, 0, fbdo->tcpClient.dataTime, "");
+        sendUploadCallback(fbdo, in, req->uploadCallback, req->uploadStatusInfo);
+    }
+}
+
+void FB_Storage::reportDownloadProgress(FirebaseData *fbdo, struct firebase_fcs_req_t *req, size_t readBytes)
+{
+    if (req->fileSize == 0)
+        return;
+
+    int p = (float)readBytes / req->fileSize * 100;
+
+    if (readBytes == 0)
+        fbdo->tcpClient.dataStart = millis();
+
+    if (req->progress != p && (p == 0 || p == 100 || req->progress + ESP_REPORT_PROGRESS_INTERVAL <= p))
+    {
+        req->progress = p;
+        fbdo->tcpClient.dataTime = millis() - fbdo->tcpClient.dataStart;
+        fbdo->session.fcs.cbDownloadInfo.status = firebase_fcs_download_status_download;
+        FCS_DownloadStatusInfo in;
+        makeDownloadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_download_status_download,
+                           p, req->fileSize, fbdo->tcpClient.dataTime, "");
+        sendDownloadCallback(fbdo, in, req->downloadCallback, req->downloadStatusInfo);
+    }
+}
+
+bool FB_Storage::fcs_sendRequest(FirebaseData *fbdo, struct firebase_fcs_req_t *req)
 {
 
-    fbdo->_ss.fcs.requestType = req->requestType;
+    fbdo->session.fcs.requestType = req->requestType;
+    fbdo->session.http_code = 0;
+    int ret = 0;
 
-    if (!Signer.getCfg()->_int.fb_flash_rdy)
-        ut->flashTest();
-
-    if (req->requestType == fb_esp_fcs_request_type_download)
+    if (req->requestType == firebase_fcs_request_type_upload)
+        ret = Core.mbfs.open(req->localFileName, mbfs_type req->storageType, mb_fs_open_mode_read);
+    if (ret > 0)
+        Core.mbfs.close(mbfs_type req->storageType); // fixed for ESP32 core v2.0.2, SPIFFS file
+    else if (ret < 0)
     {
-        if (req->storageType == mem_storage_type_sd)
-        {
-#if defined SD_FS
-            if (!ut->sdTest(Signer.getCfg()->_int.fb_file))
-            {
-                fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                return false;
-            }
-            Signer.getCfg()->_int.fb_file = SD_FS.open(req->localFileName.c_str(), FILE_WRITE);
-#endif
-        }
-        else if (req->storageType == mem_storage_type_flash)
-        {
-#if defined FLASH_FS
-            if (!Signer.getCfg()->_int.fb_flash_rdy)
-                ut->flashTest();
-
-            Signer.getCfg()->_int.fb_file = FLASH_FS.open(req->localFileName.c_str(), "w");
-#endif
-        }
-    }
-    else
-    {
-        if (req->requestType == fb_esp_fcs_request_type_upload)
-        {
-            if (req->storageType == mem_storage_type_sd)
-            {
-#if defined SD_FS
-                if (!ut->sdTest(Signer.getCfg()->_int.fb_file))
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                    return false;
-                }
-
-                if (!Signer.getCfg()->_int.fb_sd_rdy)
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                    return false;
-                }
-
-                if (!SD_FS.exists(req->localFileName.c_str()))
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                    return false;
-                }
-
-                Signer.getCfg()->_int.fb_file = SD_FS.open(req->localFileName.c_str(), FILE_READ);
-#else
-                fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                return false;
-#endif
-            }
-            else if (req->storageType == mem_storage_type_flash)
-            {
-#if defined FLASH_FS
-                if (!Signer.getCfg()->_int.fb_flash_rdy)
-                    ut->flashTest();
-
-                if (!Signer.getCfg()->_int.fb_flash_rdy)
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                    return false;
-                }
-
-                if (!FLASH_FS.exists(req->localFileName.c_str()))
-                {
-                    fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                    return false;
-                }
-
-                Signer.getCfg()->_int.fb_file = FLASH_FS.open(req->localFileName.c_str(), "r");
-#else
-                fbdo->_ss.http_code = FIREBASE_ERROR_FILE_IO_ERROR;
-                return false;
-#endif
-            }
-
-            req->fileSize = Signer.getCfg()->_int.fb_file.size();
-        }
+        fbdo->session.response.code = ret;
+        return false;
     }
 
-    MBSTRING header;
-    int ret = -1;
+    req->fileSize = ret;
 
-    if (req->requestType == fb_esp_fcs_request_type_upload || req->requestType == fb_esp_fcs_request_type_upload_pgm_data)
-        ut->appendP(header, fb_esp_pgm_str_24);
-    else if (req->requestType == fb_esp_fcs_request_type_download || req->requestType == fb_esp_fcs_request_type_get_meta || req->requestType == fb_esp_fcs_request_type_list)
-        ut->appendP(header, fb_esp_pgm_str_25);
-    else if (req->requestType == fb_esp_fcs_request_type_delete)
-        ut->appendP(header, fb_esp_pgm_str_27);
+    MB_String header;
+    size_t len = 0;
+    bool hasParams = false;
+    ret = -1;
+    firebase_request_method method = http_undefined;
 
-    ut->appendP(header, fb_esp_pgm_str_6);
-    ut->appendP(header, fb_esp_pgm_str_266);
+    if (req->requestType == firebase_fcs_request_type_upload || req->requestType == firebase_fcs_request_type_upload_pgm_data)
+        method = http_post;
+    else if (req->requestType == firebase_fcs_request_type_download ||
+             req->requestType == firebase_fcs_request_type_download_ota ||
+             req->requestType == firebase_fcs_request_type_get_meta ||
+             req->requestType == firebase_fcs_request_type_list)
+        method = http_get;
+    else if (req->requestType == firebase_fcs_request_type_delete)
+        method = http_delete;
+
+    if (method != http_undefined)
+        Core.hh.addRequestHeaderFirst(header, method);
+
+    header += firebase_storage_ss_pgm_str_2; // "/v0/b/"
     header += req->bucketID;
-    ut->appendP(header, fb_esp_pgm_str_267);
+    header += firebase_storage_ss_pgm_str_3; // "/o"
 
-    if (req->requestType == fb_esp_fcs_request_type_download)
+    if (req->requestType == firebase_fcs_request_type_download || req->requestType == firebase_fcs_request_type_download_ota)
     {
-        if (req->remoteFileName[0] != '/')
-            ut->appendP(header, fb_esp_pgm_str_1);
-
-        header += ut->url_encode(req->remoteFileName);
-        ut->appendP(header, fb_esp_pgm_str_173);
-        ut->appendP(header, fb_esp_pgm_str_269);
+        header += firebase_pgm_str_1; // "/"
+        header += Core.uh.encode(req->remoteFileName);
+        header += firebase_pgm_str_7;            // "?"
+        header += firebase_storage_ss_pgm_str_4; // "alt=media"
     }
-    else if (req->requestType != fb_esp_fcs_request_type_list)
+    else if (req->requestType != firebase_fcs_request_type_list)
+        Core.uh.addParam(header, firebase_storage_pgm_str_1 /* "name=" */,
+                            req->remoteFileName[0] == '/'
+                                ? Core.uh.encode(req->remoteFileName.substr(1, req->remoteFileName.length() - 1))
+                                : Core.uh.encode(req->remoteFileName),
+                            hasParams);
+
+    Core.hh.addRequestHeaderLast(header);
+
+    if (req->requestType == firebase_fcs_request_type_upload || req->requestType == firebase_fcs_request_type_upload_pgm_data)
     {
-        ut->appendP(header, fb_esp_pgm_str_173);
-        ut->appendP(header, fb_esp_pgm_str_268);
+        Core.hh.addContentTypeHeader(header, req->mime.c_str());
 
-        if (req->remoteFileName[0] == '/')
-            header += ut->url_encode(req->remoteFileName.substr(1, req->remoteFileName.length() - 1));
-        else
-            header += ut->url_encode(req->remoteFileName);
-    }
-
-    ut->appendP(header, fb_esp_pgm_str_30);
-
-    if (req->requestType == fb_esp_fcs_request_type_upload || req->requestType == fb_esp_fcs_request_type_upload_pgm_data)
-    {
-        ut->appendP(header, fb_esp_pgm_str_8);
-        header += req->mime;
-        ut->appendP(header, fb_esp_pgm_str_21);
-
-        ut->appendP(header, fb_esp_pgm_str_12);
-
-        size_t len = 0;
-        if (req->requestType == fb_esp_fcs_request_type_upload_pgm_data)
+        if (req->requestType == firebase_fcs_request_type_upload_pgm_data)
             len = req->pgmArcLen;
-        else if (req->requestType == fb_esp_fcs_request_type_upload)
+        else if (req->requestType == firebase_fcs_request_type_upload)
             len = req->fileSize;
 
-        header += NUM2S(len).get();
-        ut->appendP(header, fb_esp_pgm_str_21);
+        Core.hh.addContentLengthHeader(header, len);
     }
 
-    ut->appendP(header, fb_esp_pgm_str_31);
-    ut->appendP(header, fb_esp_pgm_str_265);
-    ut->appendP(header, fb_esp_pgm_str_120);
-    ut->appendP(header, fb_esp_pgm_str_21);
+    Core.hh.addGAPIsHostHeader(header, firebase_storage_ss_pgm_str_1 /* "firebasestorage." */);
 
-    ut->appendP(header, fb_esp_pgm_str_237);
-    int type = Signer.getTokenType();
-    if (type == token_type_id_token || type == token_type_custom_token)
-        ut->appendP(header, fb_esp_pgm_str_270);
-    else if (type == token_type_oauth2_access_token)
-        ut->appendP(header, fb_esp_pgm_str_271);
-
-    ret = fbdo->tcpSend(header.c_str());
-    header.clear();
-
-    if (ret < 0)
-        return false;
-
-    ret = fbdo->tcpSend(Signer.getToken());
-
-    if (ret < 0)
-        return false;
-
-    ut->appendP(header, fb_esp_pgm_str_21);
-    ut->appendP(header, fb_esp_pgm_str_32);
-    ut->appendP(header, fb_esp_pgm_str_34);
-    ut->appendP(header, fb_esp_pgm_str_21);
-
-    fbdo->_ss.http_code = FIREBASE_ERROR_TCP_ERROR_NOT_CONNECTED;
-
-    ret = fbdo->tcpSend(header.c_str());
-    header.clear();
-
-    if (ret == 0)
+    if (!Core.config->signer.test_mode)
     {
-        fbdo->_ss.connected = true;
-        if (Signer.getCfg()->_int.fb_file && req->requestType == fb_esp_fcs_request_type_upload)
+        Core.hh.addAuthHeaderFirst(header, Core.getTokenType());
+
+        fbdo->tcpSend(header.c_str());
+        header.clear();
+
+        if (fbdo->session.response.code < 0)
+            return false;
+
+        fbdo->tcpSend(Core.getToken());
+
+        if (fbdo->session.response.code < 0)
+            return false;
+
+        Core.hh.addNewLine(header);
+    }
+    Core.hh.addUAHeader(header);
+    // required for ESP32 core sdk v2.0.x.
+    bool keepAlive = false;
+#if defined(USE_CONNECTION_KEEP_ALIVE_MODE) || defined(FIREBASE_USE_CONNECTION_KEEP_ALIVE_MODE)
+    keepAlive = true;
+#endif
+    Core.hh.addConnectionHeader(header, keepAlive);
+
+    Core.hh.getCustomHeaders(&Core.sh,header, Core.config->signer.customHeaders);
+    Core.hh.addNewLine(header);
+
+    fbdo->session.response.code = FIREBASE_ERROR_TCP_ERROR_NOT_CONNECTED;
+
+    if (req->requestType == firebase_fcs_request_type_upload || req->requestType == firebase_fcs_request_type_upload_pgm_data)
+    {
+        FCS_UploadStatusInfo in;
+        makeUploadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_upload_status_init, 0, req->fileSize, 0, "");
+        sendUploadCallback(fbdo, in, req->uploadCallback, req->uploadStatusInfo);
+    }
+
+    fbdo->tcpSend(header.c_str());
+    header.clear();
+
+    if (fbdo->session.response.code > 0)
+    {
+        fbdo->session.fcs.storage_type = req->storageType;
+        bool waitResponse = true;
+        if (req->requestType == firebase_fcs_request_type_upload)
         {
-            int available = Signer.getCfg()->_int.fb_file.available();
-            int bufLen = 512;
-            uint8_t *buf = (uint8_t *)ut->newP(bufLen + 1);
-            size_t read = 0;
+            int available = len;
+            // Fix in ESP32 core 2.0.x
+            Core.mbfs.open(req->localFileName, mbfs_type req->storageType, mb_fs_open_mode_read);
+
+            int bufLen = Core.ut.getUploadBufSize(Core.config, firebase_con_mode_storage);
+            uint8_t *buf = reinterpret_cast<uint8_t *>(Core.mbfs.newP(bufLen + 1, false));
+            int read = 0;
+            int readCount = 0;
+
             while (available)
             {
                 if (available > bufLen)
                     available = bufLen;
-                read = Signer.getCfg()->_int.fb_file.read(buf, available);
-                if (fbdo->tcpClient.stream()->write(buf, read) != read)
+
+                read = Core.mbfs.read(mbfs_type req->storageType, buf, available);
+                if (read && (int)fbdo->tcpWrite(buf, read) != read)
                     break;
-                available = Signer.getCfg()->_int.fb_file.available();
+
+                readCount += read;
+                reportUploadProgress(fbdo, req, readCount);
+                available = Core.mbfs.available(mbfs_type req->storageType);
             }
-            ut->delP(&buf);
-            Signer.getCfg()->_int.fb_file.close();
+
+            Core.mbfs.delP(&buf);
+            Core.mbfs.close(mbfs_type req->storageType);
+            if (readCount == (int)req->fileSize)
+                reportUploadProgress(fbdo, req, req->fileSize);
+            else
+                waitResponse = false;
         }
-        else if (req->requestType == fb_esp_fcs_request_type_upload_pgm_data)
+        else if (req->requestType == firebase_fcs_request_type_upload_pgm_data)
         {
             int len = req->pgmArcLen;
             int available = len;
-            int bufLen = 512;
-            uint8_t *buf = (uint8_t *)ut->newP(bufLen + 1);
+            req->fileSize = len;
+
+            int bufLen = Core.ut.getUploadBufSize(Core.config, firebase_con_mode_storage);
+            uint8_t *buf = reinterpret_cast<uint8_t *>(Core.mbfs.newP(bufLen + 1, false));
             size_t pos = 0;
+
             while (available)
             {
                 if (available > bufLen)
                     available = bufLen;
                 memcpy_P(buf, req->pgmArc + pos, available);
-                if (fbdo->tcpClient.stream()->write(buf, available) != (size_t)available)
+                if ((int)fbdo->tcpWrite(buf, available) != available)
                     break;
+
+                reportUploadProgress(fbdo, req, pos);
                 pos += available;
                 len -= available;
                 available = len;
             }
-            ut->delP(&buf);
+            Core.mbfs.delP(&buf);
+            if (req->pgmArcLen == pos)
+                reportUploadProgress(fbdo, req, pos);
+            else
+                waitResponse = false;
         }
 
-        ret = handleResponse(fbdo);
-        fbdo->closeSession();
+        bool res = false;
 
-        if (Signer.getCfg()->_int.fb_file && req->requestType == fb_esp_fcs_request_type_download)
-            Signer.getCfg()->_int.fb_file.close();
+        if (waitResponse)
+        {
+            res = handleResponse(fbdo, req);
+            fbdo->closeSession();
 
-        Signer.getCfg()->_int.fb_processing = false;
-        return ret;
+            if (req->requestType == firebase_fcs_request_type_download)
+                Core.mbfs.close(mbfs_type req->storageType);
+
+            if (res)
+            {
+                if (req->requestType == firebase_fcs_request_type_download || req->requestType == firebase_fcs_request_type_download_ota)
+                {
+                    FCS_DownloadStatusInfo in;
+                    makeDownloadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_download_status_complete,
+                                       100, req->fileSize, 0, "");
+                    sendDownloadCallback(fbdo, in, req->downloadCallback, req->downloadStatusInfo);
+                }
+                else if (req->requestType == firebase_fcs_request_type_upload ||
+                         req->requestType == firebase_fcs_request_type_upload_pgm_data)
+                {
+                    FCS_UploadStatusInfo in;
+                    makeUploadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_upload_status_complete,
+                                     100, req->fileSize, 0, "");
+                    sendUploadCallback(fbdo, in, req->uploadCallback, req->uploadStatusInfo);
+                }
+            }
+        }
+        else
+            fbdo->closeSession();
+
+        Core.internal.fb_processing = false;
+
+        return res;
     }
-    else
-        fbdo->_ss.connected = false;
 
-    if (Signer.getCfg()->_int.fb_file && req->requestType == fb_esp_fcs_request_type_download)
-        Signer.getCfg()->_int.fb_file.close();
+    if (req->requestType == firebase_fcs_request_type_download)
+        Core.mbfs.close(mbfs_type req->storageType);
 
-    Signer.getCfg()->_int.fb_processing = false;
+    Core.internal.fb_processing = false;
 
     return false;
 }
 
-bool FB_Storage::handleResponse(FirebaseData *fbdo)
+bool FB_Storage::handleResponse(FirebaseData *fbdo, struct firebase_fcs_req_t *req)
 {
-#ifdef ENABLE_RTDB
-    if (fbdo->_ss.rtdb.pause)
+
+#if defined(ENABLE_RTDB) || defined(FIREBASE_ENABLE_RTDB)
+    if (fbdo->session.rtdb.pause)
         return true;
 #endif
     if (!fbdo->reconnect())
         return false;
 
-    unsigned long dataTime = millis();
-
-    WiFiClient *stream = fbdo->tcpClient.stream();
-
-    char *pChunk = nullptr;
-    char *tmp = nullptr;
-    char *header = nullptr;
-    bool isHeader = false;
-
+    bool isOTA = fbdo->session.fcs.requestType == firebase_fcs_request_type_download_ota;
+    MB_String payload;
     struct server_response_data_t response;
+    struct firebase_tcp_response_handler_t tcpHandler;
 
-    int chunkIdx = 0;
-    int pChunkIdx = 0;
-    int payloadLen = fbdo->_ss.resp_size;
-    int hBufPos = 0;
-    int chunkBufSize = stream->available();
-    int hstate = 0;
-    int chunkedDataState = 0;
-    int chunkedDataSize = 0;
-    int chunkedDataLen = 0;
-    int payloadRead = 0;
-    size_t defaultChunkSize = fbdo->_ss.resp_size;
-    struct fb_esp_auth_token_error_t error;
-    error.code = -1;
-    MBSTRING part1, part2;
-    size_t p1 = 0;
-    size_t p2 = 0;
-    char *tmp1 = ut->strP(fb_esp_pgm_str_476);
-    char *tmp2 = ut->strP(fb_esp_pgm_str_477);
-    char *tmp3 = ut->strP(fb_esp_pgm_str_3);
-    MBSTRING payload;
-    fbdo->_ss.fcs.files.items.clear();
+    Core.hh.initTCPSession(fbdo->session);
+    Core.hh.intTCPHandler(&(fbdo->tcpClient), tcpHandler, 2048, fbdo->session.resp_size, &payload, isOTA);
 
-    fbdo->_ss.http_code = FIREBASE_ERROR_HTTP_CODE_OK;
-    fbdo->_ss.content_length = -1;
-    fbdo->_ss.payload_length = 0;
-    fbdo->_ss.chunked_encoding = false;
-    fbdo->_ss.buffer_ovf = false;
+    firebase_fcs_file_list_item_t itm;
+    int fileInfoStage = 0;
+    fbdo->session.fcs.files.items.clear();
 
-    defaultChunkSize = 2048;
+    bool isList = false, isMeta = false;
+    int upos = 0;
 
-    while (fbdo->tcpClient.connected() && chunkBufSize <= 0)
-    {
-        if (!fbdo->reconnect(dataTime))
-            return false;
-        chunkBufSize = stream->available();
-        ut->idle();
-    }
+    if (!fbdo->waitResponse(tcpHandler))
+        return false;
 
     if (!fbdo->tcpClient.connected())
-        fbdo->_ss.http_code = FIREBASE_ERROR_TCP_ERROR_NOT_CONNECTED;
+        fbdo->session.response.code = FIREBASE_ERROR_TCP_ERROR_NOT_CONNECTED;
 
-    int availablePayload = chunkBufSize;
-
-    dataTime = millis();
 #ifdef ENABLE_FB_FUNCTIONS
-    fbdo->_ss.cfn.payload.clear();
+    fbdo->session.cfn.payload.clear();
 #endif
 
-    if (chunkBufSize > 1)
+    if (req->requestType == firebase_fcs_request_type_download && !fbdo->prepareDownload(req->localFileName, req->storageType, true))
+        return false;
+
+    bool complete = false;
+
+    while (tcpHandler.available() > 0 /* data available to read payload */ ||
+           tcpHandler.payloadRead < response.contentLen /* incomplete content read  */)
     {
-        while (chunkBufSize > 0 || availablePayload > 0 || payloadRead < response.contentLen)
+
+        if (!fbdo->readResponse(nullptr, tcpHandler, response))
+            break;
+
+        if (tcpHandler.pChunkIdx > 0)
         {
-            if (!fbdo->reconnect(dataTime))
-                return false;
 
-            chunkBufSize = stream->available();
-
-            if (chunkBufSize <= 0 && availablePayload <= 0 && payloadRead >= response.contentLen && response.contentLen > 0)
-                break;
-
-            if (chunkBufSize > 0)
+            if (response.httpCode == FIREBASE_ERROR_HTTP_CODE_OK && response.contentLen > 0 &&
+                (fbdo->session.fcs.requestType == firebase_fcs_request_type_download ||
+                 fbdo->session.fcs.requestType == firebase_fcs_request_type_download_ota))
             {
-                chunkBufSize = defaultChunkSize;
 
-                if (chunkIdx == 0)
+                tcpHandler.dataTime = millis();
+
+                req->fileSize = response.contentLen;
+                tcpHandler.error.code = 0;
+
+                FCS_DownloadStatusInfo in;
+                makeDownloadStatus(in, req->localFileName, req->remoteFileName, firebase_fcs_download_status_init,
+                                   0, req->fileSize, 0, "");
+                sendDownloadCallback(fbdo, in, req->downloadCallback, req->downloadStatusInfo);
+
+                int bufLen = Core.config->fcs.download_buffer_size;
+                if (bufLen < 512)
+                    bufLen = 512;
+
+                if (bufLen > 1024 * 16)
+                    bufLen = 1024 * 16;
+                uint8_t *buf = reinterpret_cast<uint8_t *>(Core.mbfs.newP(bufLen, false));
+
+                int stage = 0;
+
+                if (isOTA)
+                    fbdo->prepareDownloadOTA(tcpHandler, response);
+
+                while (fbdo->processDownload(req->localFileName, req->storageType, buf, bufLen, tcpHandler, response, stage, isOTA))
                 {
-                    //the first chunk can be http response header
-                    header = (char *)ut->newP(chunkBufSize);
-                    hstate = 1;
-                    int readLen = ut->readLine(stream, header, chunkBufSize);
-                    int pos = 0;
-
-                    tmp = ut->getHeader(header, fb_esp_pgm_str_5, fb_esp_pgm_str_6, pos, 0);
-                    ut->idle();
-                    dataTime = millis();
-                    if (tmp)
-                    {
-                        //http response header with http response code
-                        isHeader = true;
-                        hBufPos = readLen;
-                        response.httpCode = atoi(tmp);
-                        fbdo->_ss.http_code = response.httpCode;
-                        ut->delP(&tmp);
-                    }
+                    if (stage)
+                        reportDownloadProgress(fbdo, req, tcpHandler.payloadRead);
                 }
-                else
+
+                Core.mbfs.delP(&buf);
+
+                if (!isOTA)
                 {
-                    ut->idle();
-                    dataTime = millis();
-                    //the next chunk data can be the remaining http header
-                    if (isHeader)
-                    {
-                        //read one line of next header field until the empty header has found
-                        tmp = (char *)ut->newP(chunkBufSize);
-                        int readLen = ut->readLine(stream, tmp, chunkBufSize);
-                        bool headerEnded = false;
-
-                        //check is it the end of http header (\n or \r\n)?
-                        if (readLen == 1)
-                            if (tmp[0] == '\r')
-                                headerEnded = true;
-
-                        if (readLen == 2)
-                            if (tmp[0] == '\r' && tmp[1] == '\n')
-                                headerEnded = true;
-
-                        if (headerEnded)
-                        {
-                            //parse header string to get the header field
-                            isHeader = false;
-                            ut->parseRespHeader(header, response);
-                            fbdo->_ss.chunked_encoding = response.isChunkedEnc;
-
-                            if (response.httpCode == FIREBASE_ERROR_HTTP_CODE_NO_CONTENT)
-                                error.code = 0;
-
-                            if (hstate == 1)
-                                ut->delP(&header);
-                            hstate = 0;
-
-                            if (response.contentLen == 0)
-                            {
-                                ut->delP(&tmp);
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            //accumulate the remaining header field
-                            memcpy(header + hBufPos, tmp, readLen);
-                            hBufPos += readLen;
-                        }
-                        ut->delP(&tmp);
-                    }
+                    if ((int)req->fileSize == tcpHandler.payloadRead)
+                        reportDownloadProgress(fbdo, req, tcpHandler.payloadRead);
                     else
-                    {
-                        //the next chuunk data is the payload
-                        if (!response.noContent)
-                        {
-                            if (response.httpCode == FIREBASE_ERROR_HTTP_CODE_OK && response.contentLen > 0 && fbdo->_ss.fcs.requestType == fb_esp_fcs_request_type_download)
-                            {
-                                size_t available = fbdo->tcpClient.stream()->available();
-                                dataTime = millis();
-                                uint8_t *buf = (uint8_t *)ut->newP(defaultChunkSize + 1);
-                                while (fbdo->reconnect(dataTime) && fbdo->tcpClient.stream() && payloadRead < response.contentLen)
-                                {
-                                    if (available)
-                                    {
-                                        fbdo->_ss.payload_length += available;
-                                        if (fbdo->_ss.max_payload_length < fbdo->_ss.payload_length)
-                                            fbdo->_ss.max_payload_length = fbdo->_ss.payload_length;
-                                        dataTime = millis();
-                                        if (available > defaultChunkSize)
-                                            available = defaultChunkSize;
-
-                                        size_t read = fbdo->tcpClient.stream()->read(buf, available);
-                                        if (read == available)
-                                            Signer.getCfg()->_int.fb_file.write(buf, read);
-
-                                        payloadRead += available;
-                                    }
-                                    if (fbdo->tcpClient.stream())
-                                        available = fbdo->tcpClient.stream()->available();
-                                }
-                                if (payloadRead == response.contentLen)
-                                    error.code = 0;
-                                ut->delP(&buf);
-                                break;
-                            }
-                            else
-                            {
-                                pChunkIdx++;
-                                pChunk = (char *)ut->newP(chunkBufSize + 1);
-
-                                if (response.isChunkedEnc)
-                                    delay(10);
-                                //read the avilable data
-                                //chunk transfer encoding?
-                                if (response.isChunkedEnc)
-                                    availablePayload = ut->readChunkedData(stream, pChunk, chunkedDataState, chunkedDataSize, chunkedDataLen, chunkBufSize);
-                                else
-                                    availablePayload = ut->readLine(stream, pChunk, chunkBufSize);
-
-                                if (availablePayload > 0)
-                                {
-                                    fbdo->_ss.payload_length += availablePayload;
-                                    if (fbdo->_ss.max_payload_length < fbdo->_ss.payload_length)
-                                        fbdo->_ss.max_payload_length = fbdo->_ss.payload_length;
-                                    payloadRead += availablePayload;
-
-                                    if (fbdo->_ss.fcs.requestType == fb_esp_fcs_request_type_list)
-                                    {
-                                        delay(10);
-                                        part1 = pChunk;
-                                        p1 = part1.find(tmp1);
-                                        if (p1 != MBSTRING::npos)
-                                        {
-                                            p2 = part1.find(tmp3, p1 + strlen(tmp1));
-                                            if (p2 != MBSTRING::npos)
-                                                part2 = part1.substr(p1 + strlen(tmp1), p2 - p1 - strlen(tmp1));
-                                        }
-                                        else
-                                        {
-                                            p1 = part1.find(tmp2);
-                                            if (p1 != MBSTRING::npos)
-                                            {
-                                                p2 = part1.find(tmp3, p1 + strlen(tmp2));
-                                                if (p2 != MBSTRING::npos)
-                                                {
-                                                    fb_esp_fcs_file_list_item_t itm;
-                                                    itm.name = part2;
-                                                    itm.bucket = part1.substr(p1 + strlen(tmp2), p2 - p1 - strlen(tmp2));
-                                                    fbdo->_ss.fcs.files.items.push_back(itm);
-                                                    part2.clear();
-                                                    part1.clear();
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    if (payloadRead < payloadLen)
-                                        payload += pChunk;
-                                }
-
-                                ut->delP(&pChunk);
-
-                                if (availablePayload < 0 || (payloadRead >= response.contentLen && !response.isChunkedEnc))
-                                {
-                                    while (stream->available() > 0)
-                                        stream->read();
-                                    break;
-                                }
-                            }
-                        }
-                        else
-                        {
-                            //read all the rest data
-                            while (stream->available() > 0)
-                                stream->read();
-                        }
-                    }
+                        tcpHandler.error.code = FIREBASE_ERROR_TCP_RESPONSE_PAYLOAD_READ_TIMED_OUT;
                 }
 
-                chunkIdx++;
+                if (isOTA)
+                    fbdo->endDownloadOTA(tcpHandler);
+
+                if (tcpHandler.error.code != 0)
+                    fbdo->session.response.code = tcpHandler.error.code;
+
+                break;
             }
-        }
-
-        ut->delP(&tmp1);
-        ut->delP(&tmp2);
-        ut->delP(&tmp3);
-
-        if (hstate == 1)
-            ut->delP(&header);
-
-        //parse the payload
-        if (payload.length() > 0)
-        {
-            if (payload[0] == '{')
+            else
             {
-                if (!fbdo->_ss.jsonPtr)
-                    fbdo->_ss.jsonPtr = new FirebaseJson();
+                MB_String pChunk;
+                fbdo->readPayload(&pChunk, tcpHandler, response);
 
-                if (!fbdo->_ss.dataPtr)
-                    fbdo->_ss.dataPtr = new FirebaseJsonData();
+                // Last chunk?
+                if (Core.ut.isChunkComplete(&tcpHandler, &response, complete))
+                    break;
 
-                fbdo->_ss.jsonPtr->setJsonData(payload.c_str());
-                payload.clear();
-
-                char *tmp = ut->strP(fb_esp_pgm_str_257);
-                fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                ut->delP(&tmp);
-
-                if (fbdo->_ss.dataPtr->success)
+                if (tcpHandler.bufferAvailable > 0 && pChunk.length() > 0)
                 {
-                    error.code = fbdo->_ss.dataPtr->to<int>();
-                    tmp = ut->strP(fb_esp_pgm_str_258);
-                    fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                    ut->delP(&tmp);
-                    if (fbdo->_ss.dataPtr->success)
-                        fbdo->_ss.error = fbdo->_ss.dataPtr->to<const char *>();
+                    FBUtils::idle();
+
+                    isList = fbdo->session.fcs.requestType == firebase_fcs_request_type_list;
+                    isMeta = fbdo->session.fcs.requestType != firebase_fcs_request_type_download_ota &&
+                             fbdo->session.fcs.requestType != firebase_fcs_request_type_download;
+
+                    if (fbdo->getUploadInfo(0, fileInfoStage, pChunk, isList, isMeta, &itm, upos))
+                        fbdo->session.fcs.files.items.push_back(itm);
+
+                    payload += pChunk;
                 }
-                else
-                {
-                    error.code = 0;
-                    if (fbdo->_ss.fcs.requestType != fb_esp_fcs_request_type_list)
-                    {
-                        tmp = ut->strP(fb_esp_pgm_str_274);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.name = fbdo->_ss.dataPtr->to<const char *>();
-
-                        tmp = ut->strP(fb_esp_pgm_str_275);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.bucket = fbdo->_ss.dataPtr->to<const char *>();
-
-                        tmp = ut->strP(fb_esp_pgm_str_276);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.generation = atof(fbdo->_ss.dataPtr->to<const char *>());
-
-                        tmp = ut->strP(fb_esp_pgm_str_277);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.contentType = fbdo->_ss.dataPtr->to<const char *>();
-
-                        tmp = ut->strP(fb_esp_pgm_str_278);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.size = atoi(fbdo->_ss.dataPtr->to<const char *>());
-
-                        tmp = ut->strP(fb_esp_pgm_str_279);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.etag = fbdo->_ss.dataPtr->to<const char *>();
-
-                        tmp = ut->strP(fb_esp_pgm_str_280);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.crc32 = fbdo->_ss.dataPtr->to<const char *>();
-
-                        tmp = ut->strP(fb_esp_pgm_str_272);
-                        fbdo->_ss.jsonPtr->get(*fbdo->_ss.dataPtr, tmp);
-                        ut->delP(&tmp);
-                        if (fbdo->_ss.dataPtr->success)
-                            fbdo->_ss.fcs.meta.downloadTokens = fbdo->_ss.dataPtr->to<const char *>();
-                    }
-                }
-
-                fbdo->_ss.dataPtr->clear();
-                fbdo->_ss.jsonPtr->clear();
             }
-
-            fbdo->_ss.content_length = response.payloadLen;
         }
-
-        return error.code == 0;
-    }
-    else
-    {
-
-        while (stream->available() > 0)
-            stream->read();
     }
 
-    return false;
+    // To make sure all chunks read and
+    // ready to send next request
+    if (response.isChunkedEnc)
+        fbdo->tcpClient.flush();
+
+    fbdo->getAllUploadInfo(0, fileInfoStage, payload, isList, isMeta, &itm);
+
+    // parse payload for error
+    fbdo->getError(payload, tcpHandler, response, true);
+
+    return tcpHandler.error.code == 0;
+}
+
+bool FB_Storage::parseJsonResponse(FirebaseData *fbdo, PGM_P key_path)
+{
+    return Core.jh.parse(fbdo->session.jsonPtr, fbdo->session.dataPtr, key_path);
 }
 
 #endif
 
-#endif //ENABLE
+#endif // ENABLE
